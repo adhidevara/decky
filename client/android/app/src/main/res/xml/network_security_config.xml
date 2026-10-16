@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Decky bicara ws:// ke PC di jaringan lokal, bukan https. Itu disengaja:
+  trafiknya sudah dienkripsi di lapisan Noise (NNpsk0, kunci dari pairing PIN),
+  dan sertifikat TLS tidak ada artinya untuk alamat RFC1918 yang berubah-ubah
+  serta tidak punya nama domain.
+
+  Android tidak menerima rentang CIDR di <domain>, jadi cleartext diizinkan
+  secara umum. Aplikasi ini memang tidak pernah menghubungi internet sama
+  sekali — satu-satunya tujuan koneksi adalah host yang dipilih user.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

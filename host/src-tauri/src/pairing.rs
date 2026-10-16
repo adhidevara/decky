@@ -43,8 +43,13 @@ pub struct PairingSession {
 
 impl PairingSession {
     pub fn new() -> Self {
+        Self::with_pin(random_pin())
+    }
+
+    /// Sesi dengan PIN yang ditentukan. Dipakai uji interop.
+    pub fn with_pin(pin: String) -> Self {
         Self {
-            pin: random_pin(),
+            pin,
             started: Instant::now(),
         }
     }

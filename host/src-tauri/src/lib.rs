@@ -1,10 +1,10 @@
 //! Decky Host — pintu masuk aplikasi Tauri.
 
-mod config;
-mod net;
-mod pairing;
-mod proto_gen;
-mod state;
+pub mod config;
+pub mod net;
+pub mod pairing;
+pub mod proto_gen;
+pub mod state;
 
 use std::sync::Arc;
 use tauri::{Emitter, Manager};

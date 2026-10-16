@@ -21,21 +21,28 @@ Decky mengubah HP jadi *control surface* untuk komputer desktop, setara [WingDec
 
 ## Roadmap
 
-### Fase 0 — Fondasi ✅ sedang berjalan
+### Fase 0 — Fondasi ✅ selesai
 
 - [x] Init repo, `.gitignore`, README, lisensi
 - [x] Spesifikasi protokol (`docs/PROTOCOL.md`)
-- [ ] `protocol/schema/decky-v1.json` + codegen ke Rust (`serde`) dan Dart
-- [ ] Scaffold `host/` (Tauri + SvelteKit + TypeScript)
-- [ ] Scaffold `client/` (Flutter)
+- [x] `protocol/schema/decky-v1.json` + codegen ke Rust (`serde`) dan Dart
+- [x] Scaffold `host/` (Tauri v2 + SvelteKit + TypeScript)
+- [x] Scaffold `client/` (Flutter)
 
-**Verifikasi:** `cargo build` dan `flutter build apk --debug` sukses; tipe hasil codegen kompilasi di kedua sisi.
+### Fase 1 — Transport + Pairing
 
-### Fase 1 — Transport + Pairing ⟵ fase paling kritis
+**Host — selesai.** Server WebSocket (`tokio` + `tokio-tungstenite`), framing MessagePack (`rmp-serde`), mDNS (`mdns-sd`), Noise NNpsk0 (`snow`), alur PIN + rate limit, token di Windows Credential Manager, chunking untuk payload > 64 KB, `TCP_NODELAY`, idle timeout, ping/pong + RTT.
 
-- Host: server WebSocket (`tokio` + `tokio-tungstenite`), framing MessagePack (`rmp-serde`), publikasi mDNS (`mdns-sd`), handshake Noise (`snow`), alur PIN, simpan token via DPAPI
-- Client: discovery, layar pairing, `flutter_secure_storage`, reconnect exponential backoff, indikator status koneksi
-- Host UI: window konfigurasi minimal + tray icon dengan jumlah device terhubung
+**Client — transport selesai.** Noise NNpsk0 ditulis tangan di Dart (tidak ada paket yang terawat), framing + chunking, discovery mDNS, token di Android Keystore, reconnect exponential backoff, UI pairing + status.
+
+Interop dibuktikan oleh `client/test/interop_test.dart`: test itu menjalankan host Rust sungguhan lewat `cargo run --example interop_host`, lalu melakukan pairing penuh. Unit test di satu bahasa saja tidak bisa menangkap ketidakcocokan handshake.
+
+**Sisa Fase 1:**
+
+- [ ] UI konfigurasi host (SvelteKit) — saat ini hanya ada perintah Tauri, belum ada layarnya
+- [ ] Tray icon dengan jumlah device terhubung
+- [ ] Jembatan USB: host menjalankan `adb reverse` otomatis saat device tercolok
+- [ ] Uji di HP fisik (discovery mDNS tidak bisa diuji di emulator)
 
 **Verifikasi:** HP menemukan PC otomatis; pairing PIN sukses; matikan Wi-Fi → reconnect sendiri tanpa pairing ulang; RTT `ping`/`pong` tampil di UI.
 

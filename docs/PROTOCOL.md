@@ -71,6 +71,14 @@ Rate limit pairing: **5 percobaan per client_id per 10 menit**, lalu backoff 15 
 
 Semua frame berikutnya = ciphertext Noise berisi MessagePack envelope.
 
+Satu pesan Noise maksimal 65535 byte termasuk tag 16 byte, jadi plaintext efektif 65519 byte. Payload yang lebih besar — ikon deck, album art — dipecah di lapisan transport, **sebelum** dienkripsi. Tiap potongan diawali satu byte flag:
+
+```text
+[u8 flag][potongan payload…]      flag: 0 = potongan terakhir, 1 = masih ada lanjutan
+```
+
+Penerima menumpuk potongan sampai melihat flag `0`, lalu memproses hasil gabungannya sebagai satu envelope. Batas rakitan 8 MB; melewati itu koneksi ditutup. Lapisan aplikasi tidak pernah melihat mekanisme ini.
+
 Mode `pair` → host kirim `welcome` yang berisi `token` (32 byte). Client simpan di Android Keystore, host simpan hash-nya + metadata device. Koneksi berikutnya pakai mode `session`.
 
 ## 4. Envelope

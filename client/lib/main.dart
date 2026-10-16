@@ -1,121 +1,245 @@
 import 'package:flutter/material.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+import 'transport/connection.dart';
+import 'transport/discovery.dart';
+import 'transport/identity.dart';
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+void main() => runApp(const DeckyApp());
 
-  // This widget is the root of your application.
+class DeckyApp extends StatelessWidget {
+  const DeckyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Decky',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2F6FED)),
+        useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF2F6FED),
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      home: const ConnectPage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class ConnectPage extends StatefulWidget {
+  const ConnectPage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<ConnectPage> createState() => _ConnectPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _ConnectPageState extends State<ConnectPage> {
+  final Discovery _discovery = Discovery();
+  List<HostEndpoint> _hosts = [];
+  DeckyConnection? _conn;
+  String? _setupError;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    try {
+      final identity = await Identity.load();
+      final conn = DeckyConnection(identity);
+      conn.addListener(() => setState(() {}));
+      if (!mounted) return;
+      setState(() => _conn = conn);
+
+      await _discovery.start();
+      _discovery.hosts.listen((hosts) {
+        if (mounted) setState(() => _hosts = hosts);
+      });
+    } catch (e) {
+      if (mounted) setState(() => _setupError = '$e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _discovery.dispose();
+    _conn?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connect(HostEndpoint host) async {
+    final conn = _conn!;
+    final token = await TokenStore.load(host.hostId);
+    if (!mounted) return;
+
+    // Belum ada token untuk host ini: satu-satunya jalan adalah pairing PIN.
+    final pin = token == null ? await _askPin(host) : null;
+    if (token == null && pin == null) return;
+
+    await conn.connect(host, pin: pin);
+  }
+
+  Future<String?> _askPin(HostEndpoint host) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Pairing dengan ${host.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Buka Decky Host di PC, tekan "Pairing", lalu masukkan PIN-nya.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              style: const TextStyle(fontSize: 28, letterSpacing: 8),
+              textAlign: TextAlign.center,
+              decoration: const InputDecoration(counterText: '', hintText: '000000'),
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Sambungkan'),
+          ),
+        ],
+      ),
+    ).then((pin) => (pin != null && pin.length == 6) ? pin : null);
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final conn = _conn;
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+        title: const Text('Decky'),
+        actions: [
+          if (conn?.status.isLive ?? false)
+            IconButton(
+              icon: const Icon(Icons.link_off),
+              tooltip: 'Putuskan',
+              onPressed: conn!.disconnect,
             ),
-          ],
-        ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+      body: _setupError != null
+          ? _Message(icon: Icons.error_outline, text: 'Gagal menyiapkan: $_setupError')
+          : conn == null
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _StatusCard(status: conn.status),
+                    const SizedBox(height: 24),
+                    Text('Host ditemukan', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    // USB selalu ditawarkan: adb reverse tidak muncul di mDNS,
+                    // tapi jalurnya yang paling cepat kalau kabel tercolok.
+                    _HostTile(
+                      host: HostEndpoint.usb,
+                      subtitle: 'Lewat kabel (adb reverse)',
+                      onTap: () => _connect(HostEndpoint.usb),
+                    ),
+                    for (final h in _hosts)
+                      _HostTile(
+                        host: h,
+                        subtitle: '${h.address}:${h.port}',
+                        onTap: () => _connect(h),
+                      ),
+                    if (_hosts.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: _Message(
+                          icon: Icons.wifi_find,
+                          text: 'Mencari host di Wi-Fi yang sama…',
+                        ),
+                      ),
+                  ],
+                ),
+    );
+  }
+}
+
+class _StatusCard extends StatelessWidget {
+  const _StatusCard({required this.status});
+
+  final ConnectionStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color, icon) = switch (status.state) {
+      ConnState.idle => ('Belum tersambung', Colors.grey, Icons.circle_outlined),
+      ConnState.connecting => ('Menyambung…', Colors.orange, Icons.sync),
+      ConnState.pairing => ('Pairing…', Colors.orange, Icons.vpn_key),
+      ConnState.connected => ('Tersambung', Colors.green, Icons.check_circle),
+      ConnState.reconnecting => ('Menyambung ulang…', Colors.orange, Icons.sync_problem),
+      ConnState.failed => ('Gagal', Colors.red, Icons.error),
+    };
+
+    return Card(
+      child: ListTile(
+        leading: Icon(icon, color: color, size: 32),
+        title: Text(label),
+        subtitle: Text([
+          if (status.host != null) status.host!.name,
+          if (status.rttMs != null) '${status.rttMs} ms',
+          if (status.error != null) status.error!,
+        ].join(' · ')),
+      ),
+    );
+  }
+}
+
+class _HostTile extends StatelessWidget {
+  const _HostTile({required this.host, required this.subtitle, required this.onTap});
+
+  final HostEndpoint host;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: Icon(host.via == HostVia.usb ? Icons.usb : Icons.computer),
+        title: Text(host.name),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _Message extends StatelessWidget {
+  const _Message({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 40, color: Theme.of(context).colorScheme.outline),
+          const SizedBox(height: 12),
+          Text(text, textAlign: TextAlign.center),
+        ],
       ),
     );
   }

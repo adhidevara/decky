@@ -101,7 +101,14 @@ impl AppCtx {
 
     /// Mulai sesi pairing baru, menggantikan yang lama kalau ada.
     pub fn start_pairing(&self) -> PairingSession {
-        let session = PairingSession::new();
+        self.start_pairing_with(PairingSession::new())
+    }
+
+    /// Varian dengan PIN yang ditentukan pemanggil.
+    ///
+    /// Dipakai uji interop, yang butuh PIN tetap supaya kedua sisi menurunkan
+    /// PSK yang sama tanpa harus membaca layar.
+    pub fn start_pairing_with(&self, session: PairingSession) -> PairingSession {
         *self.pairing.lock().expect("pairing mutex keracunan") = Some(session.clone());
         self.emit(UiEvent::PairingStarted {
             pin: session.pin.clone(),

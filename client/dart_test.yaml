@@ -1,0 +1,5 @@
+# Tag `interop` menjalankan host Rust sungguhan lewat cargo — lambat dan butuh
+# toolchain Rust. Lewati dengan: flutter test --exclude-tags interop
+tags:
+  interop:
+    timeout: 5x
