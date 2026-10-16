@@ -1,0 +1,60 @@
+# === Rust / Tauri ===
+target/
+**/*.rs.bk
+*.pdb
+
+# === Node ===
+node_modules/
+dist/
+.svelte-kit/
+.vite/
+*.tsbuildinfo
+
+# === Flutter / Dart ===
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.iml
+.pub-cache/
+.pub/
+
+# Android
+client/android/local.properties
+client/android/key.properties
+client/android/app/*.jks
+client/android/app/*.keystore
+.gradle/
+captures/
+
+# iOS (nanti)
+client/ios/Pods/
+client/ios/.symlinks/
+client/ios/Flutter/Flutter.framework
+client/ios/Flutter/Flutter.podspec
+
+# === Generated protocol code ===
+protocol/generated/
+
+# === Secrets / signing ===
+*.env
+.env.*
+!.env.example
+signing/
+*.p12
+*.pfx
+
+# === Editor / OS ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Runtime artifacts ===
+*.log
+decky-host.log
+
+# Pengaturan Claude Code per-mesin
+.claude/settings.local.json

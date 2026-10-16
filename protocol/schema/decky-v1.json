@@ -1,0 +1,396 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://decky.local/schema/decky-v1.json",
+  "title": "Decky Wire Protocol v1",
+  "description": "Sumber kebenaran untuk pesan Decky. Host (Rust/serde) dan client (Dart) generate tipe dari file ini. Lihat docs/PROTOCOL.md untuk semantik.",
+  "x-protocol-version": 1,
+  "x-default-port": 8787,
+
+  "type": "object",
+  "$ref": "#/$defs/Envelope",
+
+  "$defs": {
+    "Envelope": {
+      "type": "object",
+      "required": ["v", "t", "d"],
+      "properties": {
+        "v": { "type": "integer", "const": 1, "description": "versi protokol" },
+        "t": { "$ref": "#/$defs/MessageType" },
+        "id": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "hanya untuk pola request/response" },
+        "d": { "type": "object", "description": "payload, bentuknya ditentukan oleh t" }
+      },
+      "additionalProperties": false
+    },
+
+    "MessageType": {
+      "enum": [
+        "ping", "pong", "error",
+        "welcome", "deck_layout", "deck_state", "deck_profiles",
+        "monitor_tick", "media_state", "lyrics", "blob",
+        "deck_press", "deck_release", "deck_switch_profile",
+        "pointer_move", "pointer_button", "scroll", "key", "text",
+        "monitor_sub", "monitor_unsub", "media_cmd", "want_blob"
+      ]
+    },
+
+    "Capability": {
+      "enum": [
+        "deck", "input", "monitor", "monitor.cpu_temp", "monitor.gpu",
+        "monitor.gpu_temp", "media", "media.seek", "lyrics", "obs"
+      ]
+    },
+
+    "ErrorCode": {
+      "enum": [
+        "proto_version", "auth_failed", "pair_expired", "pair_throttled",
+        "unknown_action", "action_failed", "cap_missing", "internal"
+      ]
+    },
+
+    "Hello": {
+      "description": "Frame plaintext pertama dari client, SEBELUM handshake Noise.",
+      "type": "object",
+      "required": ["v", "mode", "client_id"],
+      "properties": {
+        "v": { "type": "integer", "const": 1 },
+        "mode": { "enum": ["pair", "session"] },
+        "client_id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string", "maxLength": 64, "description": "nama device untuk ditampilkan di host" },
+        "platform": { "enum": ["android", "ios", "web"] },
+        "app_version": { "type": "string", "maxLength": 32 }
+      },
+      "additionalProperties": false
+    },
+
+    "HelloAck": {
+      "description": "Balasan plaintext host atas Hello.",
+      "type": "object",
+      "required": ["v", "ok"],
+      "properties": {
+        "v": { "type": "integer", "const": 1 },
+        "ok": { "type": "boolean" },
+        "noise": { "type": "string", "const": "Noise_NNpsk0_25519_ChaChaPoly_SHA256" },
+        "code": { "$ref": "#/$defs/ErrorCode" }
+      },
+      "additionalProperties": false
+    },
+
+    "Ping": {
+      "type": "object",
+      "required": ["ts"],
+      "properties": { "ts": { "type": "integer", "minimum": 0, "description": "monotonic ms pengirim" } },
+      "additionalProperties": false
+    },
+
+    "Pong": { "$ref": "#/$defs/Ping" },
+
+    "Error": {
+      "type": "object",
+      "required": ["code", "msg"],
+      "properties": {
+        "code": { "$ref": "#/$defs/ErrorCode" },
+        "msg": { "type": "string", "maxLength": 512 }
+      },
+      "additionalProperties": false
+    },
+
+    "Welcome": {
+      "type": "object",
+      "required": ["host_name", "os", "host_id", "proto", "caps"],
+      "properties": {
+        "host_name": { "type": "string", "maxLength": 64 },
+        "os": { "enum": ["windows", "macos", "linux"] },
+        "host_id": { "type": "string", "format": "uuid" },
+        "proto": { "type": "integer", "const": 1 },
+        "caps": { "type": "array", "items": { "$ref": "#/$defs/Capability" } },
+        "token": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "description": "token pairing 32 byte; HANYA dikirim sekali, pada koneksi mode=pair yang sukses"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "Button": {
+      "type": "object",
+      "required": ["idx", "label"],
+      "properties": {
+        "idx": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "label": { "type": "string", "maxLength": 32 },
+        "icon_id": { "type": "string", "description": "blob_id ikon; client cache by id" },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "style": { "enum": ["normal", "toggle"], "default": "normal" },
+        "action_hint": { "type": "string", "maxLength": 64, "description": "teks deskriptif untuk aksesibilitas; BUKAN definisi aksi" }
+      },
+      "additionalProperties": false
+    },
+
+    "DeckLayout": {
+      "type": "object",
+      "required": ["profile_id", "name", "cols", "rows", "buttons"],
+      "properties": {
+        "profile_id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 48 },
+        "cols": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "rows": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "buttons": { "type": "array", "items": { "$ref": "#/$defs/Button" } }
+      },
+      "additionalProperties": false
+    },
+
+    "DeckState": {
+      "type": "object",
+      "required": ["idx", "active"],
+      "properties": {
+        "idx": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "active": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+
+    "DeckProfiles": {
+      "type": "object",
+      "required": ["profiles", "active"],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string", "maxLength": 48 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "active": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "Gpu": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 64 },
+        "util": { "type": "number", "minimum": 0, "maximum": 100 },
+        "mem_used": { "type": "integer", "minimum": 0 },
+        "mem_total": { "type": "integer", "minimum": 0 },
+        "temp": { "type": "number", "description": "derajat Celsius" }
+      },
+      "additionalProperties": false
+    },
+
+    "MonitorTick": {
+      "type": "object",
+      "required": ["ts", "cpu", "mem_used", "mem_total", "net_rx", "net_tx", "disk_r", "disk_w"],
+      "properties": {
+        "ts": { "type": "integer" },
+        "cpu": { "type": "number", "minimum": 0, "maximum": 100 },
+        "cpu_per_core": { "type": "array", "items": { "type": "number" } },
+        "mem_used": { "type": "integer", "minimum": 0 },
+        "mem_total": { "type": "integer", "minimum": 0 },
+        "net_rx": { "type": "integer", "minimum": 0, "description": "byte/detik sejak tick sebelumnya" },
+        "net_tx": { "type": "integer", "minimum": 0 },
+        "disk_r": { "type": "integer", "minimum": 0 },
+        "disk_w": { "type": "integer", "minimum": 0 },
+        "cpu_temp": { "type": "number", "description": "hanya ada kalau cap monitor.cpu_temp diumumkan" },
+        "gpu": { "$ref": "#/$defs/Gpu" }
+      },
+      "additionalProperties": false
+    },
+
+    "MediaState": {
+      "type": "object",
+      "required": ["playing", "title", "artist", "duration_ms", "position_ms", "pos_at"],
+      "properties": {
+        "playing": { "type": "boolean" },
+        "title": { "type": "string", "maxLength": 256 },
+        "artist": { "type": "string", "maxLength": 256 },
+        "album": { "type": "string", "maxLength": 256 },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "position_ms": { "type": "integer", "minimum": 0 },
+        "pos_at": { "type": "integer", "description": "monotonic host ms saat position_ms diambil; client ekstrapolasi dari sini" },
+        "art_id": { "type": "string", "description": "blob_id album art" },
+        "app": { "type": "string", "maxLength": 64, "description": "aplikasi sumber, mis. Spotify" }
+      },
+      "additionalProperties": false
+    },
+
+    "Lyrics": {
+      "type": "object",
+      "required": ["track_key", "source", "lines"],
+      "properties": {
+        "track_key": { "type": "string", "description": "hash artist+title; client buang lirik kalau track_key tidak cocok dengan media_state" },
+        "source": { "enum": ["lrc_file", "cache", "online"] },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["t_ms", "text"],
+            "properties": {
+              "t_ms": { "type": "integer", "minimum": 0 },
+              "text": { "type": "string", "maxLength": 512 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "Blob": {
+      "type": "object",
+      "required": ["blob_id", "mime", "data"],
+      "properties": {
+        "blob_id": { "type": "string", "description": "hash konten; stabil, jadi client bisa cache permanen" },
+        "mime": { "enum": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"] },
+        "data": { "type": "string", "contentEncoding": "base64", "description": "byte mentah di MessagePack, base64 hanya saat direpresentasikan sebagai JSON" }
+      },
+      "additionalProperties": false
+    },
+
+    "DeckPress": {
+      "type": "object",
+      "required": ["idx"],
+      "properties": { "idx": { "type": "integer", "minimum": 0, "maximum": 65535 } },
+      "additionalProperties": false
+    },
+
+    "DeckRelease": { "$ref": "#/$defs/DeckPress" },
+
+    "DeckSwitchProfile": {
+      "type": "object",
+      "required": ["profile_id"],
+      "properties": { "profile_id": { "type": "string" } },
+      "additionalProperties": false
+    },
+
+    "PointerMove": {
+      "description": "Delta relatif yang sudah di-coalesce. TIDAK PERNAH koordinat absolut.",
+      "type": "object",
+      "required": ["e", "dt"],
+      "properties": {
+        "e": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "integer", "minimum": -32768, "maximum": 32767 }
+          },
+          "description": "pasangan [dx, dy]"
+        },
+        "dt": { "type": "integer", "minimum": 0, "maximum": 65535, "description": "ms sejak batch sebelumnya; dipakai host untuk kurva akselerasi" }
+      },
+      "additionalProperties": false
+    },
+
+    "PointerButton": {
+      "type": "object",
+      "required": ["btn", "down"],
+      "properties": {
+        "btn": { "type": "integer", "enum": [0, 1, 2], "description": "0 kiri, 1 tengah, 2 kanan" },
+        "down": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+
+    "Scroll": {
+      "type": "object",
+      "required": ["dx", "dy"],
+      "properties": {
+        "dx": { "type": "integer", "minimum": -32768, "maximum": 32767 },
+        "dy": { "type": "integer", "minimum": -32768, "maximum": 32767 }
+      },
+      "additionalProperties": false
+    },
+
+    "Key": {
+      "type": "object",
+      "required": ["code", "down", "mods"],
+      "properties": {
+        "code": { "type": "string", "maxLength": 32, "description": "nama W3C KeyboardEvent.code, mis. KeyA, Enter, ArrowLeft, F5" },
+        "down": { "type": "boolean" },
+        "mods": { "type": "integer", "minimum": 0, "maximum": 15, "description": "bitmask: 1 Shift, 2 Ctrl, 4 Alt, 8 Meta" }
+      },
+      "additionalProperties": false
+    },
+
+    "Text": {
+      "type": "object",
+      "required": ["s"],
+      "properties": { "s": { "type": "string", "maxLength": 4096 } },
+      "additionalProperties": false
+    },
+
+    "MonitorSub": {
+      "type": "object",
+      "required": ["interval_ms"],
+      "properties": {
+        "interval_ms": { "type": "integer", "minimum": 200, "maximum": 10000, "default": 1000 },
+        "want": {
+          "type": "array",
+          "items": { "enum": ["cpu", "cpu_per_core", "mem", "net", "disk", "gpu", "temp"] },
+          "description": "host kirim hanya yang diminta, untuk hemat bandwidth dan baterai"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "MonitorUnsub": { "type": "object", "properties": {}, "additionalProperties": false },
+
+    "MediaCmd": {
+      "type": "object",
+      "required": ["cmd"],
+      "properties": {
+        "cmd": { "enum": ["toggle", "play", "pause", "next", "prev", "seek"] },
+        "arg": { "type": "integer", "description": "posisi target dalam ms, hanya untuk seek" }
+      },
+      "additionalProperties": false
+    },
+
+    "WantBlob": {
+      "type": "object",
+      "required": ["blob_id"],
+      "properties": { "blob_id": { "type": "string" } },
+      "additionalProperties": false
+    }
+  },
+
+  "x-message-map": {
+    "_comment": "Pemetaan t -> $defs payload. Dipakai codegen untuk membangun enum bertag.",
+    "host_to_client": {
+      "welcome": "Welcome",
+      "deck_layout": "DeckLayout",
+      "deck_state": "DeckState",
+      "deck_profiles": "DeckProfiles",
+      "monitor_tick": "MonitorTick",
+      "media_state": "MediaState",
+      "lyrics": "Lyrics",
+      "blob": "Blob"
+    },
+    "client_to_host": {
+      "deck_press": "DeckPress",
+      "deck_release": "DeckRelease",
+      "deck_switch_profile": "DeckSwitchProfile",
+      "pointer_move": "PointerMove",
+      "pointer_button": "PointerButton",
+      "scroll": "Scroll",
+      "key": "Key",
+      "text": "Text",
+      "monitor_sub": "MonitorSub",
+      "monitor_unsub": "MonitorUnsub",
+      "media_cmd": "MediaCmd",
+      "want_blob": "WantBlob"
+    },
+    "bidirectional": {
+      "ping": "Ping",
+      "pong": "Pong",
+      "error": "Error"
+    }
+  }
+}
