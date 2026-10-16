@@ -168,6 +168,12 @@ function emitRust() {
     out.push("}", "");
   }
 
+  // Definisi yang hanya berupa $ref jadi alias tipe, bukan struct duplikat.
+  for (const [name, def] of Object.entries(DEFS)) {
+    if (isAlias(def)) out.push(`pub type ${name} = ${refName(def.$ref)};`);
+  }
+  out.push("");
+
   out.push(`pub const PROTOCOL_VERSION: u8 = ${SCHEMA["x-protocol-version"]};`);
   out.push(`pub const DEFAULT_PORT: u16 = ${SCHEMA["x-default-port"]};`);
   out.push(`pub const ALL_MESSAGE_TYPES: [&str; ${Object.keys(all).length}] = [${Object.keys(all).map((t) => `"${t}"`).join(", ")}];`);
@@ -322,6 +328,12 @@ function emitDart() {
     out.push(`      };`);
     out.push("}", "");
   }
+
+  // Definisi yang hanya berupa $ref jadi alias tipe, bukan class duplikat.
+  for (const [name, def] of Object.entries(DEFS)) {
+    if (isAlias(def)) out.push(`typedef ${name} = ${refName(def.$ref)};`);
+  }
+  out.push("");
 
   const all = { ...MAP.bidirectional, ...MAP.host_to_client, ...MAP.client_to_host };
   out.push("/// Nama tipe pesan, persis seperti di kawat.");

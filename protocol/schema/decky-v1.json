@@ -84,7 +84,8 @@
 
     "Pong": { "$ref": "#/$defs/Ping" },
 
-    "Error": {
+    "ErrorMsg": {
+      "description": "Payload pesan `error`. Dinamai ErrorMsg, bukan Error, supaya tidak menaungi tipe bawaan Dart dan Rust.",
       "type": "object",
       "required": ["code", "msg"],
       "properties": {
@@ -149,22 +150,22 @@
       "additionalProperties": false
     },
 
+    "ProfileRef": {
+      "description": "Profil deck dalam bentuk ringkas, untuk daftar pilihan di client.",
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 48 }
+      },
+      "additionalProperties": false
+    },
+
     "DeckProfiles": {
       "type": "object",
       "required": ["profiles", "active"],
       "properties": {
-        "profiles": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["id", "name"],
-            "properties": {
-              "id": { "type": "string" },
-              "name": { "type": "string", "maxLength": 48 }
-            },
-            "additionalProperties": false
-          }
-        },
+        "profiles": { "type": "array", "items": { "$ref": "#/$defs/ProfileRef" } },
         "active": { "type": "string" }
       },
       "additionalProperties": false
@@ -309,7 +310,8 @@
       "additionalProperties": false
     },
 
-    "Key": {
+    "KeyEvent": {
+      "description": "Payload pesan `key`. Dinamai KeyEvent agar tidak bentrok dengan Key milik Flutter.",
       "type": "object",
       "required": ["code", "down", "mods"],
       "properties": {
@@ -320,7 +322,8 @@
       "additionalProperties": false
     },
 
-    "Text": {
+    "TextInput": {
+      "description": "Payload pesan `text`. Dinamai TextInput agar tidak bentrok dengan widget Text milik Flutter.",
       "type": "object",
       "required": ["s"],
       "properties": { "s": { "type": "string", "maxLength": 4096 } },
@@ -380,8 +383,8 @@
       "pointer_move": "PointerMove",
       "pointer_button": "PointerButton",
       "scroll": "Scroll",
-      "key": "Key",
-      "text": "Text",
+      "key": "KeyEvent",
+      "text": "TextInput",
       "monitor_sub": "MonitorSub",
       "monitor_unsub": "MonitorUnsub",
       "media_cmd": "MediaCmd",
@@ -390,7 +393,7 @@
     "bidirectional": {
       "ping": "Ping",
       "pong": "Pong",
-      "error": "Error"
+      "error": "ErrorMsg"
     }
   }
 }

@@ -102,14 +102,43 @@ void main() {
     expect(welcome.token, isNotNull, reason: 'mode pair harus menerbitkan token');
     expect(welcome.token!.length, 32);
 
-    // 4. Ping harus dibalas pong dengan ts yang sama persis.
-    const ts = 1234567;
-    ws.sink.add(await chan.seal(
-      split(encodeEnvelope(MsgType.ping, const Ping(ts: ts).toMap())).single,
-    ));
+    expect(welcome.caps, contains(Capability.deck));
 
-    final pongFrame = Reassembler().push(await chan.open(await inbox.next));
-    final pong = Frame.decode(pongFrame!);
+    Future<Frame> nextFrame() async {
+      final bytes = Reassembler().push(await chan.open(await inbox.next));
+      return Frame.decode(bytes!);
+    }
+
+    Future<void> send(String type, Map<String, dynamic> payload) async {
+      ws.sink.add(await chan.seal(split(encodeEnvelope(type, payload)).single));
+    }
+
+    // 4. Deck dikirim otomatis setelah welcome: daftar profil, lalu layout.
+    final profilesFrame = await nextFrame();
+    expect(profilesFrame.type, MsgType.deckProfiles);
+    final profiles = DeckProfiles.fromMap(profilesFrame.data);
+    expect(profiles.profiles, isNotEmpty);
+
+    final layoutFrame = await nextFrame();
+    expect(layoutFrame.type, MsgType.deckLayout);
+    final layout = DeckLayout.fromMap(layoutFrame.data);
+    expect(layout.profileId, profiles.active);
+    expect(layout.buttons, isNotEmpty);
+    expect(layout.buttons.every((b) => b.idx < layout.cols * layout.rows), isTrue);
+
+    // 5. Menekan tombol yang tidak ada harus ditolak, bukan didiamkan.
+    //
+    // Sengaja memilih indeks kosong: menekan tombol asli akan benar-benar
+    // menjalankan aksinya di mesin yang menjalankan test ini.
+    await send(MsgType.deckPress, const DeckPress(idx: 9999).toMap());
+    final errFrame = await nextFrame();
+    expect(errFrame.type, MsgType.error);
+    expect(ErrorMsg.fromMap(errFrame.data).code, ErrorCode.unknownAction);
+
+    // 6. Ping harus dibalas pong dengan ts yang sama persis.
+    const ts = 1234567;
+    await send(MsgType.ping, const Ping(ts: ts).toMap());
+    final pong = await nextFrame();
     expect(pong.type, MsgType.pong);
     expect(Ping.fromMap(pong.data).ts, ts);
 

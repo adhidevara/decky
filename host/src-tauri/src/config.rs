@@ -7,6 +7,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::actions::DeckConfig;
+use crate::actions::obs::ObsSettings;
 use crate::proto_gen::DEFAULT_PORT;
 
 /// Device yang pernah dipasangkan. Tanpa token — hanya metadata tampilan.
@@ -30,6 +32,10 @@ pub struct HostConfig {
     pub port: u16,
     #[serde(default)]
     pub devices: Vec<PairedDevice>,
+    #[serde(default)]
+    pub deck: DeckConfig,
+    #[serde(default)]
+    pub obs: ObsSettings,
 }
 
 impl Default for HostConfig {
@@ -39,6 +45,8 @@ impl Default for HostConfig {
             host_name: hostname(),
             port: DEFAULT_PORT,
             devices: Vec::new(),
+            deck: DeckConfig::default(),
+            obs: ObsSettings::default(),
         }
     }
 }

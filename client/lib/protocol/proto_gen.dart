@@ -283,8 +283,9 @@ class Ping {
       };
 }
 
-class Error {
-  const Error({
+/// Payload pesan `error`. Dinamai ErrorMsg, bukan Error, supaya tidak menaungi tipe bawaan Dart dan Rust.
+class ErrorMsg {
+  const ErrorMsg({
     required this.code,
     required this.msg,
   });
@@ -292,7 +293,7 @@ class Error {
   final ErrorCode code;
   final String msg;
 
-  factory Error.fromMap(Map<String, dynamic> m) => Error(
+  factory ErrorMsg.fromMap(Map<String, dynamic> m) => ErrorMsg(
         code: ErrorCode.fromWire(m['code'] as String),
         msg: m['msg'] as String,
       );
@@ -430,22 +431,43 @@ class DeckState {
       };
 }
 
+/// Profil deck dalam bentuk ringkas, untuk daftar pilihan di client.
+class ProfileRef {
+  const ProfileRef({
+    required this.id,
+    required this.name,
+  });
+
+  final String id;
+  final String name;
+
+  factory ProfileRef.fromMap(Map<String, dynamic> m) => ProfileRef(
+        id: m['id'] as String,
+        name: m['name'] as String,
+      );
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'id': id,
+        'name': name,
+      };
+}
+
 class DeckProfiles {
   const DeckProfiles({
     required this.profiles,
     required this.active,
   });
 
-  final List<Map<String, dynamic>> profiles;
+  final List<ProfileRef> profiles;
   final String active;
 
   factory DeckProfiles.fromMap(Map<String, dynamic> m) => DeckProfiles(
-        profiles: (m['profiles'] as List).map((e) => e as Map<String, dynamic>).toList(),
+        profiles: (m['profiles'] as List).map((e) => ProfileRef.fromMap((e as Map).cast<String, dynamic>())).toList(),
         active: m['active'] as String,
       );
 
   Map<String, dynamic> toMap() => <String, dynamic>{
-        'profiles': profiles,
+        'profiles': profiles.map((e) => e.toMap()).toList(),
         'active': active,
       };
 }
@@ -739,8 +761,9 @@ class Scroll {
       };
 }
 
-class Key {
-  const Key({
+/// Payload pesan `key`. Dinamai KeyEvent agar tidak bentrok dengan Key milik Flutter.
+class KeyEvent {
+  const KeyEvent({
     required this.code,
     required this.down,
     required this.mods,
@@ -752,7 +775,7 @@ class Key {
   /// bitmask: 1 Shift, 2 Ctrl, 4 Alt, 8 Meta
   final int mods;
 
-  factory Key.fromMap(Map<String, dynamic> m) => Key(
+  factory KeyEvent.fromMap(Map<String, dynamic> m) => KeyEvent(
         code: m['code'] as String,
         down: m['down'] as bool,
         mods: m['mods'] as int,
@@ -765,14 +788,15 @@ class Key {
       };
 }
 
-class Text {
-  const Text({
+/// Payload pesan `text`. Dinamai TextInput agar tidak bentrok dengan widget Text milik Flutter.
+class TextInput {
+  const TextInput({
     required this.s,
   });
 
   final String s;
 
-  factory Text.fromMap(Map<String, dynamic> m) => Text(
+  factory TextInput.fromMap(Map<String, dynamic> m) => TextInput(
         s: m['s'] as String,
       );
 
@@ -849,6 +873,9 @@ class WantBlob {
         'blob_id': blobId,
       };
 }
+
+typedef Pong = Ping;
+typedef DeckRelease = DeckPress;
 
 /// Nama tipe pesan, persis seperti di kawat.
 abstract final class MsgType {

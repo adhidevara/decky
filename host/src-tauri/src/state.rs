@@ -6,9 +6,10 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
+use crate::actions::obs::ObsClient;
 use crate::config::HostConfig;
 use crate::pairing::{AttemptLimiter, PairingSession};
 
@@ -33,6 +34,8 @@ pub enum UiEvent {
     Connected(Connection),
     Disconnected { client_id: String },
     Rtt { client_id: String, rtt_ms: u32 },
+    /// Layout atau profil deck berubah; koneksi yang hidup mengirim ulang.
+    DeckChanged,
     ServerError { msg: String },
 }
 
@@ -43,13 +46,18 @@ pub struct AppCtx {
     limiter: Mutex<AttemptLimiter>,
     conns: Mutex<HashMap<String, Connection>>,
     events: broadcast::Sender<UiEvent>,
+    /// Koneksi OBS dipakai bersama semua client, dan menyambung sendiri
+    /// saat pertama dibutuhkan.
+    pub obs: Arc<ObsClient>,
 }
 
 impl AppCtx {
     pub fn new(cfg_dir: PathBuf, cfg: HostConfig) -> Self {
         let (events, _) = broadcast::channel(64);
+        let obs = Arc::new(ObsClient::new(cfg.obs.clone()));
         Self {
             cfg_dir,
+            obs,
             cfg: Mutex::new(cfg),
             pairing: Mutex::new(None),
             limiter: Mutex::new(AttemptLimiter::new()),

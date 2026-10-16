@@ -48,9 +48,17 @@ Interop dibuktikan oleh `client/test/interop_test.dart`: test itu menjalankan ho
 
 ### Fase 2 — Mode Deck
 
-- Host: registry aksi — `launch_app`, `hotkey`, `text`, `open_url`, `media_key`, `run_script`, `obs_scene` (`obws`, obs-websocket v5)
-- Host: layout grid N×M, profil, label + ikon, persist sebagai JSON, editor drag & drop di UI Tauri
-- Client: render grid, haptic + feedback visual, cache ikon by `blob_id`
+**Selesai.** Registry aksi (`launch_app`, `open_url`, `hotkey`, `text`, `media_key`, `run_script`, `obs_scene`), injeksi keyboard lewat `SendInput`, pemetaan W3C `KeyboardEvent.code` ke virtual-key Windows, layout grid + profil tersimpan di config, editor grid di UI host dengan perekam hotkey, dan grid di HP dengan haptic.
+
+Perubahan layout didorong ke HP yang sedang terhubung lewat bus event, jadi mengedit tombol di PC langsung terlihat di HP tanpa menyambung ulang.
+
+Batas keamanan yang disengaja: client hanya mengirim **indeks** tombol. Definisi aksi tidak pernah menyeberang, dan `action_hint` yang dikirim ke HP sengaja kabur ("Jalankan perintah", bukan isi perintahnya). HP yang dibajak hanya bisa menekan tombol yang sudah dipasang user.
+
+**Sisa:**
+
+- [ ] Ikon tombol (`blob_id` + cache di client) — sekarang baru label dan warna
+- [ ] Tombol `toggle` yang mengikuti state, mis. scene OBS yang sedang aktif
+- [ ] Uji aksi sungguhan di HP fisik
 
 **Verifikasi:** tombol buka Notepad, tombol hotkey `Ctrl+Shift+M`, tombol ganti scene OBS — semua trigger dari HP.
 

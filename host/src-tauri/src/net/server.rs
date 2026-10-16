@@ -11,13 +11,15 @@ use tokio_tungstenite::tungstenite::Message;
 
 use super::frame;
 use super::noise::{self, Channel, TOKEN_LEN};
+use crate::actions::{self, Action};
 use crate::config::{PairedDevice, now_secs};
 use crate::pairing::{self, TokenStore};
 use crate::proto_gen::{
-    Capability, ClientMsg, ErrorCode, Hello, HelloAck, HelloMode, HostMsg, Ping, Welcome,
-    WelcomeOs, PROTOCOL_VERSION,
+    Capability, ClientMsg, DeckPress, DeckProfiles, DeckSwitchProfile, ErrorCode, Hello, HelloAck,
+    HelloMode, HostMsg, Ping, Welcome, WelcomeOs, PROTOCOL_VERSION,
 };
 use crate::state::{AppCtx, Connection, UiEvent};
+use tokio::sync::broadcast::error::RecvError;
 
 /// Client dianggap mati kalau diam selama ini. Client mengirim ping tiap 5
 /// detik, jadi 20 detik memberi ruang tiga ping yang hilang.
@@ -175,10 +177,11 @@ async fn handshake(
         os: WelcomeOs::Windows,
         host_id,
         proto: PROTOCOL_VERSION as i64,
-        caps: capabilities(),
+        caps: capabilities(ctx).await,
         token: token.map(|t| t.to_vec()),
     });
     send_encrypted(&mut ws, &mut chan, &welcome).await?;
+    send_deck(ctx, &mut ws, &mut chan).await?;
 
     Ok((ws, chan, hello))
 }
@@ -216,10 +219,14 @@ fn finish_pairing(ctx: &Arc<AppCtx>, hello: &Hello) -> anyhow::Result<[u8; TOKEN
 
 /// Kapabilitas yang benar-benar sudah jalan.
 ///
-/// Sengaja pendek: Fase 1 baru punya transport. Mode lain menyusul, dan client
-/// menyembunyikan UI untuk cap yang tidak diumumkan di sini.
-fn capabilities() -> Vec<Capability> {
-    Vec::new()
+/// Client menyembunyikan UI untuk apa pun yang tidak ada di sini, jadi daftar
+/// ini harus jujur: lebih baik fitur tidak muncul daripada muncul lalu gagal.
+async fn capabilities(ctx: &Arc<AppCtx>) -> Vec<Capability> {
+    let mut caps = vec![Capability::Deck, Capability::Input];
+    if ctx.obs.is_live().await {
+        caps.push(Capability::Obs);
+    }
+    caps
 }
 
 async fn message_loop(
@@ -228,11 +235,28 @@ async fn message_loop(
     chan: &mut Channel,
     client_id: &str,
 ) -> anyhow::Result<()> {
+    let mut events = ctx.subscribe();
+
     loop {
-        let raw = match tokio::time::timeout(IDLE_TIMEOUT, read_binary(ws)).await {
-            Ok(Ok(v)) => v,
-            Ok(Err(e)) => return Err(e),
-            Err(_) => anyhow::bail!("client {client_id} diam melewati batas"),
+        let raw = tokio::select! {
+            // Config berubah di UI host: dorong layout baru tanpa menunggu
+            // client bertanya.
+            ev = events.recv() => {
+                match ev {
+                    Ok(UiEvent::DeckChanged) => send_deck(ctx, ws, chan).await?,
+                    // Client yang lambat bisa tertinggal; kirim ulang saja
+                    // daripada memutus koneksi.
+                    Err(RecvError::Lagged(_)) => send_deck(ctx, ws, chan).await?,
+                    Err(RecvError::Closed) => anyhow::bail!("bus event tertutup"),
+                    Ok(_) => {}
+                }
+                continue;
+            }
+            read = tokio::time::timeout(IDLE_TIMEOUT, read_binary(ws)) => match read {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => return Err(e),
+                Err(_) => anyhow::bail!("client {client_id} diam melewati batas"),
+            },
         };
 
         let Some(plain) = chan.open(&raw)? else {
@@ -259,21 +283,102 @@ async fn message_loop(
                     ctx.set_rtt(client_id, rtt.min(u32::MAX as u64) as u32);
                 }
             }
+            ClientMsg::DeckPress(DeckPress { idx }) => {
+                if let Err(e) = press_button(ctx, idx).await {
+                    tracing::warn!("tombol {idx} gagal: {e}");
+                    let code = match e {
+                        actions::ActionError::NoSuchButton(_) => ErrorCode::UnknownAction,
+                        _ => ErrorCode::ActionFailed,
+                    };
+                    send_error(ws, chan, code, &e.to_string()).await?;
+                }
+            }
+
+            // Aksi dijalankan saat ditekan, bukan saat dilepas, supaya terasa
+            // responsif. Release hanya berguna untuk tombol tahan nanti.
+            ClientMsg::DeckRelease(_) => {}
+
+            ClientMsg::DeckSwitchProfile(DeckSwitchProfile { profile_id }) => {
+                let known = ctx.with_cfg(|c| c.deck.profile(&profile_id).is_some());
+                if !known {
+                    send_error(ws, chan, ErrorCode::UnknownAction, "profil tidak ada").await?;
+                    continue;
+                }
+                ctx.update_cfg(|c| c.deck.active = profile_id.clone())?;
+                send_deck(ctx, ws, chan).await?;
+            }
+
             other => {
-                // Fase 1 belum punya mode apa pun; beri tahu client dengan jujur.
+                // Mode yang belum ada. Katakan apa adanya daripada diam.
                 tracing::debug!("pesan {other:?} belum didukung");
-                send_encrypted(
-                    ws,
-                    chan,
-                    &HostMsg::Error(crate::proto_gen::Error {
-                        code: ErrorCode::CapMissing,
-                        msg: "fitur ini belum tersedia di host".into(),
-                    }),
-                )
-                .await?;
+                send_error(ws, chan, ErrorCode::CapMissing, "fitur ini belum tersedia di host")
+                    .await?;
             }
         }
     }
+}
+
+/// Jalankan aksi di balik sebuah tombol.
+///
+/// Client hanya mengirim indeks; definisi aksinya dicari di sini, dari config
+/// host. Itu yang membuat HP tidak bisa menyuruh PC menjalankan apa pun yang
+/// belum dipasang user sendiri.
+async fn press_button(ctx: &Arc<AppCtx>, idx: u16) -> Result<(), actions::ActionError> {
+    let action: Action = ctx
+        .with_cfg(|c| {
+            c.deck
+                .active_profile()
+                .and_then(|p| p.button(idx))
+                .map(|b| b.action.clone())
+        })
+        .ok_or(actions::ActionError::NoSuchButton(idx))?;
+
+    tracing::info!("tombol {idx}: {}", action.hint());
+    actions::execute(&action, &ctx.obs).await
+}
+
+/// Kirim layout profil aktif beserta daftar profil yang tersedia.
+async fn send_deck(ctx: &Arc<AppCtx>, ws: &mut Ws, chan: &mut Channel) -> anyhow::Result<()> {
+    let (layout, profiles) = ctx.with_cfg(|c| {
+        (
+            c.deck.active_profile().map(|p| p.to_wire()),
+            DeckProfiles {
+                profiles: c
+                    .deck
+                    .profiles
+                    .iter()
+                    .map(|p| crate::proto_gen::ProfileRef {
+                        id: p.id.clone(),
+                        name: p.name.clone(),
+                    })
+                    .collect(),
+                active: c.deck.active.clone(),
+            },
+        )
+    });
+
+    send_encrypted(ws, chan, &HostMsg::DeckProfiles(profiles)).await?;
+    if let Some(layout) = layout {
+        send_encrypted(ws, chan, &HostMsg::DeckLayout(layout)).await?;
+    }
+    Ok(())
+}
+
+async fn send_error(
+    ws: &mut Ws,
+    chan: &mut Channel,
+    code: ErrorCode,
+    msg: &str,
+) -> anyhow::Result<()> {
+    send_encrypted(
+        ws,
+        chan,
+        &HostMsg::Error(crate::proto_gen::ErrorMsg {
+            code,
+            msg: msg.to_string(),
+        }),
+    )
+    .await
 }
 
 // ── helper I/O ──────────────────────────────────────────────────────────────

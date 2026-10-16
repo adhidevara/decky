@@ -239,8 +239,9 @@ pub struct Ping {
     pub ts: u64,
 }
 
+/// Payload pesan `error`. Dinamai ErrorMsg, bukan Error, supaya tidak menaungi tipe bawaan Dart dan Rust.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Error {
+pub struct ErrorMsg {
     pub code: ErrorCode,
     pub msg: String,
 }
@@ -289,9 +290,16 @@ pub struct DeckState {
     pub active: bool,
 }
 
+/// Profil deck dalam bentuk ringkas, untuk daftar pilihan di client.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProfileRef {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeckProfiles {
-    pub profiles: Vec<serde_json::Value>,
+    pub profiles: Vec<ProfileRef>,
     pub active: String,
 }
 
@@ -398,8 +406,9 @@ pub struct Scroll {
     pub dy: i16,
 }
 
+/// Payload pesan `key`. Dinamai KeyEvent agar tidak bentrok dengan Key milik Flutter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Key {
+pub struct KeyEvent {
     /// nama W3C KeyboardEvent.code, mis. KeyA, Enter, ArrowLeft, F5
     pub code: String,
     pub down: bool,
@@ -407,8 +416,9 @@ pub struct Key {
     pub mods: u8,
 }
 
+/// Payload pesan `text`. Dinamai TextInput agar tidak bentrok dengan widget Text milik Flutter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Text {
+pub struct TextInput {
     pub s: String,
 }
 
@@ -446,7 +456,7 @@ pub enum HostMsg {
     #[serde(rename = "pong")]
     Pong(Ping),
     #[serde(rename = "error")]
-    Error(Error),
+    Error(ErrorMsg),
     #[serde(rename = "welcome")]
     Welcome(Welcome),
     #[serde(rename = "deck_layout")]
@@ -474,7 +484,7 @@ pub enum ClientMsg {
     #[serde(rename = "pong")]
     Pong(Ping),
     #[serde(rename = "error")]
-    Error(Error),
+    Error(ErrorMsg),
     #[serde(rename = "deck_press")]
     DeckPress(DeckPress),
     #[serde(rename = "deck_release")]
@@ -488,9 +498,9 @@ pub enum ClientMsg {
     #[serde(rename = "scroll")]
     Scroll(Scroll),
     #[serde(rename = "key")]
-    Key(Key),
+    Key(KeyEvent),
     #[serde(rename = "text")]
-    Text(Text),
+    Text(TextInput),
     #[serde(rename = "monitor_sub")]
     MonitorSub(MonitorSub),
     #[serde(rename = "monitor_unsub")]
@@ -500,6 +510,9 @@ pub enum ClientMsg {
     #[serde(rename = "want_blob")]
     WantBlob(WantBlob),
 }
+
+pub type Pong = Ping;
+pub type DeckRelease = DeckPress;
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const DEFAULT_PORT: u16 = 8787;

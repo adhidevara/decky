@@ -3,6 +3,8 @@
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
 
+  import Deck from "./Deck.svelte";
+
   type Connection = {
     client_id: string;
     name: string;
@@ -160,6 +162,8 @@
       </button>
     {/if}
   </section>
+
+  <Deck />
 
   <section>
     <h2>Device</h2>

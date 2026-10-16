@@ -1,5 +1,6 @@
 //! Decky Host — pintu masuk aplikasi Tauri.
 
+pub mod actions;
 pub mod config;
 pub mod net;
 pub mod pairing;
@@ -68,6 +69,48 @@ fn forget_device(rt: tauri::State<'_, Runtime>, client_id: String) -> Result<(),
         .update_cfg(|c| c.remove_device(&client_id))
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+fn deck_config(rt: tauri::State<'_, Runtime>) -> actions::DeckConfig {
+    rt.ctx.with_cfg(|c| c.deck.clone())
+}
+
+#[tauri::command]
+fn set_deck_config(
+    rt: tauri::State<'_, Runtime>,
+    deck: actions::DeckConfig,
+) -> Result<(), String> {
+    rt.ctx
+        .update_cfg(|c| c.deck = deck)
+        .map_err(|e| e.to_string())?;
+    // Dorong layout baru ke HP yang sedang terhubung, jangan tunggu mereka
+    // menyambung ulang.
+    rt.ctx.emit(state::UiEvent::DeckChanged);
+    Ok(())
+}
+
+#[tauri::command]
+fn obs_settings(rt: tauri::State<'_, Runtime>) -> actions::obs::ObsSettings {
+    rt.ctx.with_cfg(|c| c.obs.clone())
+}
+
+#[tauri::command]
+async fn set_obs_settings(
+    rt: tauri::State<'_, Runtime>,
+    settings: actions::obs::ObsSettings,
+) -> Result<(), String> {
+    rt.ctx
+        .update_cfg(|c| c.obs = settings.clone())
+        .map_err(|e| e.to_string())?;
+    rt.ctx.obs.configure(settings).await;
+    Ok(())
+}
+
+/// Coba sambung ke OBS sekarang, untuk tombol "Tes koneksi" di UI.
+#[tauri::command]
+async fn obs_probe(rt: tauri::State<'_, Runtime>) -> Result<String, String> {
+    rt.ctx.obs.current_scene().await
 }
 
 #[tauri::command]
@@ -142,7 +185,12 @@ pub fn run() {
             start_pairing,
             stop_pairing,
             forget_device,
-            set_host_name
+            set_host_name,
+            deck_config,
+            set_deck_config,
+            obs_settings,
+            set_obs_settings,
+            obs_probe
         ])
         .build(tauri::generate_context!())
         .expect("gagal membangun aplikasi Tauri")
