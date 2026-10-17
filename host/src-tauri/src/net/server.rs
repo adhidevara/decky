@@ -14,9 +14,11 @@ use super::noise::{self, Channel, TOKEN_LEN};
 use crate::actions::{self, Action};
 use crate::config::{PairedDevice, now_secs};
 use crate::pairing::{self, TokenStore};
+use crate::actions::ButtonStyle;
 use crate::proto_gen::{
-    Capability, ClientMsg, DeckPress, DeckProfiles, DeckSwitchProfile, ErrorCode, Hello, HelloAck,
-    HelloMode, HostMsg, Ping, Welcome, WelcomeOs, PROTOCOL_VERSION,
+    Blob, BlobMime, Capability, ClientMsg, DeckPress, DeckProfiles, DeckState, DeckSwitchProfile,
+    ErrorCode, Hello, HelloAck, HelloMode, HostMsg, Ping, Welcome, WantBlob, WelcomeOs,
+    PROTOCOL_VERSION,
 };
 use crate::state::{AppCtx, Connection, UiEvent};
 use tokio::sync::broadcast::error::RecvError;
@@ -35,6 +37,8 @@ pub async fn run(ctx: Arc<AppCtx>, mut shutdown: watch::Receiver<bool>) -> anyho
     let port = ctx.port();
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
     tracing::info!("server mendengarkan di 0.0.0.0:{port}");
+
+    tokio::spawn(watch_obs_scene(ctx.clone()));
 
     loop {
         tokio::select! {
@@ -64,6 +68,38 @@ pub async fn run(ctx: Arc<AppCtx>, mut shutdown: watch::Receiver<bool>) -> anyho
                     }
                 });
             }
+        }
+    }
+}
+
+/// Pantau scene OBS yang aktif dan siarkan perubahannya.
+///
+/// obs-websocket punya stream event, tapi polling dua detik jauh lebih
+/// sederhana dan tahan terhadap OBS yang ditutup lalu dibuka lagi — kasus yang
+/// justru paling sering terjadi. Polling berhenti sendiri saat tidak ada HP
+/// yang terhubung atau OBS tidak diaktifkan.
+async fn watch_obs_scene(ctx: Arc<AppCtx>) {
+    const POLL: Duration = Duration::from_secs(2);
+    let mut last: Option<String> = None;
+
+    loop {
+        tokio::time::sleep(POLL).await;
+
+        if ctx.connections().is_empty() {
+            last = None;
+            continue;
+        }
+
+        match ctx.obs.current_scene().await {
+            Ok(scene) => {
+                if last.as_deref() != Some(scene.as_str()) {
+                    last = Some(scene.clone());
+                    ctx.emit(UiEvent::ObsSceneChanged { scene });
+                }
+            }
+            // OBS tidak jalan atau tidak diaktifkan. Diamkan saja — ini
+            // keadaan normal, bukan kesalahan.
+            Err(_) => last = None,
         }
     }
 }
@@ -244,6 +280,9 @@ async fn message_loop(
             ev = events.recv() => {
                 match ev {
                     Ok(UiEvent::DeckChanged) => send_deck(ctx, ws, chan).await?,
+                    Ok(UiEvent::ObsSceneChanged { scene }) => {
+                        send_scene_states(ctx, ws, chan, &scene).await?
+                    }
                     // Client yang lambat bisa tertinggal; kirim ulang saja
                     // daripada memutus koneksi.
                     Err(RecvError::Lagged(_)) => send_deck(ctx, ws, chan).await?,
@@ -284,19 +323,42 @@ async fn message_loop(
                 }
             }
             ClientMsg::DeckPress(DeckPress { idx }) => {
-                if let Err(e) = press_button(ctx, idx).await {
-                    tracing::warn!("tombol {idx} gagal: {e}");
-                    let code = match e {
-                        actions::ActionError::NoSuchButton(_) => ErrorCode::UnknownAction,
-                        _ => ErrorCode::ActionFailed,
-                    };
-                    send_error(ws, chan, code, &e.to_string()).await?;
+                match press_button(ctx, idx).await {
+                    // Menekan tombol scene mengubah scene aktif, jadi tombol
+                    // toggle lain harus ikut padam saat itu juga.
+                    Ok(()) => send_toggle_states(ctx, ws, chan).await?,
+                    Err(e) => {
+                        tracing::warn!("tombol {idx} gagal: {e}");
+                        let code = match e {
+                            actions::ActionError::NoSuchButton(_) => ErrorCode::UnknownAction,
+                            _ => ErrorCode::ActionFailed,
+                        };
+                        send_error(ws, chan, code, &e.to_string()).await?;
+                    }
                 }
             }
 
             // Aksi dijalankan saat ditekan, bukan saat dilepas, supaya terasa
             // responsif. Release hanya berguna untuk tombol tahan nanti.
             ClientMsg::DeckRelease(_) => {}
+
+            ClientMsg::WantBlob(WantBlob { blob_id }) => {
+                match ctx.blobs.load(&blob_id) {
+                    Ok((mime, data)) => {
+                        let Some(mime) = wire_mime(&mime) else {
+                            send_error(ws, chan, ErrorCode::Internal, "tipe blob tak terduga")
+                                .await?;
+                            continue;
+                        };
+                        send_encrypted(ws, chan, &HostMsg::Blob(Blob { blob_id, mime, data }))
+                            .await?;
+                    }
+                    Err(e) => {
+                        tracing::debug!("blob {blob_id} tidak bisa dibaca: {e}");
+                        send_error(ws, chan, ErrorCode::UnknownAction, "ikon tidak ada").await?;
+                    }
+                }
+            }
 
             ClientMsg::DeckSwitchProfile(DeckSwitchProfile { profile_id }) => {
                 let known = ctx.with_cfg(|c| c.deck.profile(&profile_id).is_some());
@@ -361,7 +423,65 @@ async fn send_deck(ctx: &Arc<AppCtx>, ws: &mut Ws, chan: &mut Channel) -> anyhow
     if let Some(layout) = layout {
         send_encrypted(ws, chan, &HostMsg::DeckLayout(layout)).await?;
     }
+    send_toggle_states(ctx, ws, chan).await
+}
+
+/// Perbarui semua tombol toggle berdasarkan keadaan sekarang.
+async fn send_toggle_states(ctx: &Arc<AppCtx>, ws: &mut Ws, chan: &mut Channel) -> anyhow::Result<()> {
+    if !has_toggles(ctx) {
+        return Ok(());
+    }
+    // Satu-satunya sumber state saat ini adalah OBS. Kalau tidak tersambung,
+    // semua toggle dianggap padam daripada menebak.
+    let scene = ctx.obs.current_scene().await.unwrap_or_default();
+    send_scene_states(ctx, ws, chan, &scene).await
+}
+
+fn has_toggles(ctx: &Arc<AppCtx>) -> bool {
+    ctx.with_cfg(|c| {
+        c.deck
+            .active_profile()
+            .is_some_and(|p| p.buttons.iter().any(|b| b.style == ButtonStyle::Toggle))
+    })
+}
+
+/// Nyalakan tombol toggle yang scene-nya cocok dengan scene aktif.
+async fn send_scene_states(
+    ctx: &Arc<AppCtx>,
+    ws: &mut Ws,
+    chan: &mut Channel,
+    scene: &str,
+) -> anyhow::Result<()> {
+    let states: Vec<(u16, bool)> = ctx.with_cfg(|c| {
+        c.deck
+            .active_profile()
+            .map(|p| {
+                p.buttons
+                    .iter()
+                    .filter(|b| b.style == ButtonStyle::Toggle)
+                    .map(|b| match &b.action {
+                        Action::ObsScene { scene: target } => (b.idx, target == scene),
+                        _ => (b.idx, false),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+
+    for (idx, active) in states {
+        send_encrypted(ws, chan, &HostMsg::DeckState(DeckState { idx, active })).await?;
+    }
     Ok(())
+}
+
+fn wire_mime(mime: &str) -> Option<BlobMime> {
+    match mime {
+        "image/png" => Some(BlobMime::ImagePng),
+        "image/jpeg" => Some(BlobMime::ImageJpeg),
+        "image/webp" => Some(BlobMime::ImageWebp),
+        "image/svg+xml" => Some(BlobMime::ImageSvgXml),
+        _ => None,
+    }
 }
 
 async fn send_error(

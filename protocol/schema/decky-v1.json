@@ -113,6 +113,11 @@
       "additionalProperties": false
     },
 
+    "ButtonDisplayStyle": {
+      "description": "Cara tombol digambar. Dinamai panjang agar tidak bentrok dengan ButtonStyle milik Flutter.",
+      "enum": ["normal", "toggle"]
+    },
+
     "Button": {
       "type": "object",
       "required": ["idx", "label"],
@@ -121,7 +126,7 @@
         "label": { "type": "string", "maxLength": 32 },
         "icon_id": { "type": "string", "description": "blob_id ikon; client cache by id" },
         "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "style": { "enum": ["normal", "toggle"], "default": "normal" },
+        "style": { "$ref": "#/$defs/ButtonDisplayStyle" },
         "action_hint": { "type": "string", "maxLength": 64, "description": "teks deskriptif untuk aksesibilitas; BUKAN definisi aksi" }
       },
       "additionalProperties": false

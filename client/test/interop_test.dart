@@ -135,7 +135,13 @@ void main() {
     expect(errFrame.type, MsgType.error);
     expect(ErrorMsg.fromMap(errFrame.data).code, ErrorCode.unknownAction);
 
-    // 6. Ping harus dibalas pong dengan ts yang sama persis.
+    // 6. Ikon yang tidak ada harus ditolak, bukan membuat host diam.
+    await send(MsgType.wantBlob, WantBlob(blobId: '0' * 32).toMap());
+    final blobErr = await nextFrame();
+    expect(blobErr.type, MsgType.error);
+    expect(ErrorMsg.fromMap(blobErr.data).code, ErrorCode.unknownAction);
+
+    // 7. Ping harus dibalas pong dengan ts yang sama persis.
     const ts = 1234567;
     await send(MsgType.ping, const Ping(ts: ts).toMap());
     final pong = await nextFrame();

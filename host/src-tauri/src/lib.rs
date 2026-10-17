@@ -1,6 +1,7 @@
 //! Decky Host — pintu masuk aplikasi Tauri.
 
 pub mod actions;
+pub mod blobs;
 pub mod config;
 pub mod net;
 pub mod pairing;
@@ -86,6 +87,78 @@ fn set_deck_config(
         .map_err(|e| e.to_string())?;
     // Dorong layout baru ke HP yang sedang terhubung, jangan tunggu mereka
     // menyambung ulang.
+    rt.ctx.emit(state::UiEvent::DeckChanged);
+    Ok(())
+}
+
+/// Pasang ikon pada sebuah tombol.
+///
+/// Byte-nya datang dari webview sebagai base64 — berkasnya dipilih lewat
+/// `<input type="file">`, jadi tidak perlu plugin dialog.
+#[tauri::command]
+fn set_button_icon(
+    rt: tauri::State<'_, Runtime>,
+    profile_id: String,
+    idx: u16,
+    mime: String,
+    data_b64: String,
+) -> Result<String, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_b64.as_bytes())
+        .map_err(|e| format!("base64 tidak valid: {e}"))?;
+
+    let blob_id = rt
+        .ctx
+        .blobs
+        .save(&mime, &bytes)
+        .map_err(|e| e.to_string())?;
+
+    set_icon(&rt, &profile_id, idx, Some(blob_id.clone()))?;
+    Ok(blob_id)
+}
+
+#[tauri::command]
+fn clear_button_icon(
+    rt: tauri::State<'_, Runtime>,
+    profile_id: String,
+    idx: u16,
+) -> Result<(), String> {
+    set_icon(&rt, &profile_id, idx, None)
+}
+
+fn set_icon(
+    rt: &tauri::State<'_, Runtime>,
+    profile_id: &str,
+    idx: u16,
+    blob_id: Option<String>,
+) -> Result<(), String> {
+    let found = rt
+        .ctx
+        .update_cfg(|c| {
+            let Some(profile) = c.deck.profiles.iter_mut().find(|p| p.id == profile_id) else {
+                return false;
+            };
+            match profile.buttons.iter_mut().find(|b| b.idx == idx) {
+                Some(button) => {
+                    button.icon_id = blob_id;
+                    true
+                }
+                None => false,
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    if !found {
+        return Err(format!("tombol {idx} tidak ada di profil {profile_id}"));
+    }
+
+    // Ikon yang baru saja dilepas mungkin sudah tidak dipakai siapa pun.
+    let in_use = rt.ctx.with_cfg(|c| c.deck.icons_in_use());
+    if let Err(e) = rt.ctx.blobs.collect_garbage(&in_use) {
+        tracing::warn!("gagal membersihkan ikon tak terpakai: {e}");
+    }
+
     rt.ctx.emit(state::UiEvent::DeckChanged);
     Ok(())
 }
@@ -190,7 +263,9 @@ pub fn run() {
             set_deck_config,
             obs_settings,
             set_obs_settings,
-            obs_probe
+            obs_probe,
+            set_button_icon,
+            clear_button_icon
         ])
         .build(tauri::generate_context!())
         .expect("gagal membangun aplikasi Tauri")

@@ -5,10 +5,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../protocol/proto_gen.dart';
-import '../transport/frame.dart';
+import '../transport/blob_cache.dart';
 import '../transport/connection.dart';
+import '../transport/frame.dart';
 
 class DeckPage extends StatefulWidget {
   const DeckPage({super.key, required this.conn});
@@ -24,6 +26,9 @@ class _DeckPageState extends State<DeckPage> {
   DeckProfiles? _profiles;
   String? _error;
   final Set<int> _pressed = {};
+  /// Tombol toggle yang sedang menyala, menurut host.
+  final Set<int> _active = {};
+  final BlobCache _blobs = BlobCache();
 
   @override
   void initState() {
@@ -35,15 +40,51 @@ class _DeckPageState extends State<DeckPage> {
     if (!mounted) return;
     switch (frame.type) {
       case MsgType.deckLayout:
-        setState(() => _layout = DeckLayout.fromMap(frame.data));
+        final layout = DeckLayout.fromMap(frame.data);
+        setState(() => _layout = layout);
+        _fetchIcons(layout);
       case MsgType.deckProfiles:
         setState(() => _profiles = DeckProfiles.fromMap(frame.data));
+      case MsgType.deckState:
+        final state = DeckState.fromMap(frame.data);
+        setState(() {
+          if (state.active) {
+            _active.add(state.idx);
+          } else {
+            _active.remove(state.idx);
+          }
+        });
+      case MsgType.blob:
+        final blob = Blob.fromMap(frame.data);
+        _blobs.store(blob.blobId, blob.mime.wire, blob.data).then((_) {
+          if (mounted) setState(() {});
+        });
       case MsgType.error:
         final err = ErrorMsg.fromMap(frame.data);
         setState(() => _error = err.msg);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(err.msg), behavior: SnackBarBehavior.floating),
         );
+    }
+  }
+
+  /// Minta ikon yang belum ada di cache.
+  ///
+  /// Ikon dialamatkan oleh hash isinya, jadi cache yang sudah terisi tidak
+  /// pernah perlu divalidasi ulang — cukup sekali unduh per ikon, selamanya.
+  Future<void> _fetchIcons(DeckLayout layout) async {
+    for (final button in layout.buttons) {
+      final id = button.iconId;
+      if (id == null) continue;
+
+      final cached = await _blobs.load(id);
+      if (cached != null) {
+        if (mounted) setState(() {});
+        continue;
+      }
+      if (_blobs.markRequested(id)) {
+        await widget.conn.send(MsgType.wantBlob, WantBlob(blobId: id).toMap());
+      }
     }
   }
 
@@ -123,6 +164,8 @@ class _DeckPageState extends State<DeckPage> {
                   return _DeckButton(
                     button: button,
                     pressed: _pressed.contains(button.idx),
+                    active: _active.contains(button.idx),
+                    icon: button.iconId == null ? null : _blobs.peek(button.iconId!),
                     onDown: () => _press(button),
                     onUp: () => _release(button),
                   );
@@ -137,12 +180,16 @@ class _DeckButton extends StatelessWidget {
   const _DeckButton({
     required this.button,
     required this.pressed,
+    required this.active,
+    required this.icon,
     required this.onDown,
     required this.onUp,
   });
 
   final Button button;
   final bool pressed;
+  final bool active;
+  final CachedBlob? icon;
   final VoidCallback onDown;
   final VoidCallback onUp;
 
@@ -150,10 +197,23 @@ class _DeckButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final tint = button.color != null ? _parseHex(button.color!) : null;
-    final base = tint ?? scheme.surfaceContainerHighest;
+    final isToggle = button.style == ButtonDisplayStyle.toggle;
+
+    // Toggle yang padam sengaja digambar redup, bukan diberi warna lain:
+    // perbedaan terang/gelap terbaca sekilas, bahkan dari sudut mata.
+    final base = switch ((tint, isToggle && !active)) {
+      (final Color c, false) => c,
+      (final Color c, true) => Color.alphaBlend(c.withValues(alpha: 0.28), scheme.surface),
+      (null, true) => scheme.surfaceContainerLow,
+      (null, false) => scheme.surfaceContainerHighest,
+    };
+    final foreground = tint != null && !(isToggle && !active)
+        ? _readableOn(base)
+        : scheme.onSurfaceVariant;
 
     return Semantics(
       button: true,
+      toggled: isToggle ? active : null,
       label: button.actionHint == null
           ? button.label
           : '${button.label}. ${button.actionHint}',
@@ -164,29 +224,67 @@ class _DeckButton extends StatelessWidget {
         child: AnimatedScale(
           scale: pressed ? 0.94 : 1,
           duration: const Duration(milliseconds: 80),
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
             decoration: BoxDecoration(
               color: pressed ? Color.alphaBlend(Colors.black26, base) : base,
               borderRadius: BorderRadius.circular(14),
+              border: isToggle && active
+                  ? Border.all(color: foreground.withValues(alpha: 0.65), width: 2)
+                  : null,
             ),
             alignment: Alignment.center,
             padding: const EdgeInsets.all(8),
-            child: Text(
-              button.label,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: tint != null
-                    ? _readableOn(tint)
-                    : scheme.onSurfaceVariant,
-              ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Flexible(child: _Icon(blob: icon!, tint: foreground)),
+                  const SizedBox(height: 6),
+                ],
+                Text(
+                  button.label,
+                  textAlign: TextAlign.center,
+                  maxLines: icon != null ? 1 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: icon != null ? 12 : 15,
+                    fontWeight: FontWeight.w600,
+                    color: foreground,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _Icon extends StatelessWidget {
+  const _Icon({required this.blob, required this.tint});
+
+  final CachedBlob blob;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    if (blob.isSvg) {
+      // SVG ikon biasanya satu warna; diwarnai mengikuti teks supaya tetap
+      // terbaca di tema terang maupun gelap.
+      return SvgPicture.memory(
+        blob.bytes,
+        height: 32,
+        colorFilter: ColorFilter.mode(tint, BlendMode.srcIn),
+      );
+    }
+    return Image.memory(
+      blob.bytes,
+      height: 32,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (_, _, _) => Icon(Icons.broken_image, size: 24, color: tint),
     );
   }
 }

@@ -54,10 +54,12 @@ Perubahan layout didorong ke HP yang sedang terhubung lewat bus event, jadi meng
 
 Batas keamanan yang disengaja: client hanya mengirim **indeks** tombol. Definisi aksi tidak pernah menyeberang, dan `action_hint` yang dikirim ke HP sengaja kabur ("Jalankan perintah", bukan isi perintahnya). HP yang dibajak hanya bisa menekan tombol yang sudah dipasang user.
 
+Ikon dialamatkan oleh hash isinya: host menyimpan di `blobs/<id>.<ext>`, client meminta lewat `want_blob` sekali lalu meng-cache ke disk selamanya — id yang sama selalu berarti byte yang sama, jadi tidak perlu kedaluwarsa. Ikon yatim dibersihkan saat tombol melepasnya.
+
+Tombol `toggle` mengikuti scene OBS yang sedang aktif, dipantau dengan polling dua detik. Polling lebih sederhana daripada stream event obs-websocket dan tahan terhadap OBS yang ditutup lalu dibuka lagi — justru kasus yang paling sering terjadi. Polling berhenti sendiri saat tidak ada HP terhubung.
+
 **Sisa:**
 
-- [ ] Ikon tombol (`blob_id` + cache di client) — sekarang baru label dan warna
-- [ ] Tombol `toggle` yang mengikuti state, mis. scene OBS yang sedang aktif
 - [ ] Uji aksi sungguhan di HP fisik
 
 **Verifikasi:** tombol buka Notepad, tombol hotkey `Ctrl+Shift+M`, tombol ganti scene OBS — semua trigger dari HP.

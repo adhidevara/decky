@@ -17,6 +17,7 @@
     label: string;
     color?: string | null;
     icon_id?: string | null;
+    style: "normal" | "toggle";
     action: Action;
   };
 
@@ -102,7 +103,12 @@
   function ensureButton(idx: number): ButtonDef {
     const existing = buttonAt(idx);
     if (existing) return existing;
-    const created: ButtonDef = { idx, label: "Tombol", action: { type: "none" } };
+    const created: ButtonDef = {
+      idx,
+      label: "Tombol",
+      style: "normal",
+      action: { type: "none" },
+    };
     active!.buttons.push(created);
     return created;
   }
@@ -144,6 +150,56 @@
       save();
     };
     window.addEventListener("keydown", onKey, true);
+  }
+
+  const ICON_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+  const MAX_ICON = 512 * 1024;
+
+  /// Baca berkas yang dipilih lalu kirim sebagai base64.
+  ///
+  /// `<input type="file">` di webview sudah cukup; tidak perlu plugin dialog
+  /// hanya untuk memilih satu ikon.
+  async function pickIcon(button: ButtonDef, event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file || !active) return;
+
+    if (!ICON_TYPES.includes(file.type)) {
+      saveError = `Tipe ${file.type || "tidak dikenal"} tidak didukung. Pakai PNG, JPEG, WebP, atau SVG.`;
+      return;
+    }
+    if (file.size > MAX_ICON) {
+      saveError = `Ikon ${Math.round(file.size / 1024)} KB, batasnya ${MAX_ICON / 1024} KB.`;
+      return;
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (const b of bytes) binary += String.fromCharCode(b);
+
+    try {
+      button.icon_id = await invoke<string>("set_button_icon", {
+        profileId: active.id,
+        idx: button.idx,
+        mime: file.type,
+        dataB64: btoa(binary),
+      });
+      saveError = null;
+    } catch (e) {
+      saveError = String(e);
+    }
+  }
+
+  async function clearIcon(button: ButtonDef) {
+    if (!active) return;
+    try {
+      await invoke("clear_button_icon", { profileId: active.id, idx: button.idx });
+      button.icon_id = null;
+      saveError = null;
+    } catch (e) {
+      saveError = String(e);
+    }
   }
 
   onMount(load);
@@ -223,6 +279,35 @@
             </label>
           </div>
 
+          <div class="row">
+            <label class="grow">
+              Ikon
+              <div class="row">
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onchange={(e) => pickIcon(button, e)}
+                />
+                {#if button.icon_id}
+                  <button class="ghost" onclick={() => clearIcon(button)}>Hapus</button>
+                {/if}
+              </div>
+            </label>
+            <label>
+              Gaya
+              <select
+                value={button.style}
+                onchange={(e) => {
+                  button.style = e.currentTarget.value as ButtonDef["style"];
+                  save();
+                }}
+              >
+                <option value="normal">Biasa</option>
+                <option value="toggle">Toggle</option>
+              </select>
+            </label>
+          </div>
+
           <label>
             Aksi
             <select
@@ -294,6 +379,12 @@
               Nama scene
               <input bind:value={button.action.scene} onblur={save} />
             </label>
+            {#if button.style !== "toggle"}
+              <p class="warn">
+                Setel gaya ke Toggle kalau ingin tombol ini menyala saat scene-nya
+                sedang aktif.
+              </p>
+            {/if}
           {/if}
 
           <div class="row end">

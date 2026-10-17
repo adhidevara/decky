@@ -13,7 +13,7 @@ pub mod obs;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::proto_gen::{Button, DeckLayout};
+use crate::proto_gen::{Button, ButtonDisplayStyle as ButtonStyleWire, DeckLayout};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ActionError {
@@ -88,6 +88,17 @@ impl Action {
     }
 }
 
+/// Bagaimana tombol digambar di HP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ButtonStyle {
+    /// Tombol biasa: menyala sesaat saat ditekan.
+    #[default]
+    Normal,
+    /// Tombol yang punya keadaan menyala/mati, diikuti dari host.
+    Toggle,
+}
+
 /// Satu tombol beserta aksinya. Hanya ada di sisi host.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ButtonDef {
@@ -97,6 +108,8 @@ pub struct ButtonDef {
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_id: Option<String>,
+    #[serde(default)]
+    pub style: ButtonStyle,
     #[serde(default)]
     pub action: Action,
 }
@@ -109,7 +122,10 @@ impl ButtonDef {
             label: self.label.clone(),
             icon_id: self.icon_id.clone(),
             color: self.color.clone(),
-            style: None,
+            style: Some(match self.style {
+                ButtonStyle::Normal => ButtonStyleWire::Normal,
+                ButtonStyle::Toggle => ButtonStyleWire::Toggle,
+            }),
             action_hint: Some(self.action.hint()),
         }
     }
@@ -157,6 +173,7 @@ impl Default for DeckConfig {
                 label: "Mute".into(),
                 color: Some("#dc2626".into()),
                 icon_id: None,
+                style: ButtonStyle::Normal,
                 action: Action::MediaKey {
                     key: "AudioVolumeMute".into(),
                 },
@@ -166,6 +183,7 @@ impl Default for DeckConfig {
                 label: "Play".into(),
                 color: None,
                 icon_id: None,
+                style: ButtonStyle::Normal,
                 action: Action::MediaKey {
                     key: "MediaPlayPause".into(),
                 },
@@ -175,6 +193,7 @@ impl Default for DeckConfig {
                 label: "Next".into(),
                 color: None,
                 icon_id: None,
+                style: ButtonStyle::Normal,
                 action: Action::MediaKey {
                     key: "MediaTrackNext".into(),
                 },
@@ -184,6 +203,7 @@ impl Default for DeckConfig {
                 label: "Copy".into(),
                 color: None,
                 icon_id: None,
+                style: ButtonStyle::Normal,
                 action: Action::Hotkey {
                     keys: vec!["ControlLeft".into(), "KeyC".into()],
                 },
@@ -193,6 +213,7 @@ impl Default for DeckConfig {
                 label: "Paste".into(),
                 color: None,
                 icon_id: None,
+                style: ButtonStyle::Normal,
                 action: Action::Hotkey {
                     keys: vec!["ControlLeft".into(), "KeyV".into()],
                 },
@@ -202,6 +223,7 @@ impl Default for DeckConfig {
                 label: "Notepad".into(),
                 color: None,
                 icon_id: None,
+                style: ButtonStyle::Normal,
                 action: Action::LaunchApp {
                     path: "notepad.exe".into(),
                     args: vec![],
@@ -234,6 +256,15 @@ impl DeckConfig {
 
     pub fn profile(&self, id: &str) -> Option<&Profile> {
         self.profiles.iter().find(|p| p.id == id)
+    }
+
+    /// Semua ikon yang masih dirujuk, di seluruh profil.
+    pub fn icons_in_use(&self) -> Vec<String> {
+        self.profiles
+            .iter()
+            .flat_map(|p| p.buttons.iter())
+            .filter_map(|b| b.icon_id.clone())
+            .collect()
     }
 }
 
@@ -306,6 +337,7 @@ mod tests {
             label: "Deploy".into(),
             color: None,
             icon_id: None,
+            style: ButtonStyle::Normal,
             action: Action::RunScript {
                 command: "deploy.sh".into(),
                 args: vec!["--prod".into(), "--token=rahasia".into()],

@@ -74,6 +74,17 @@ enum ErrorCode {
       ErrorCode.values.firstWhere((e) => e.wire == w);
 }
 
+/// Cara tombol digambar. Dinamai panjang agar tidak bentrok dengan ButtonStyle milik Flutter.
+enum ButtonDisplayStyle {
+  normal('normal'),
+  toggle('toggle');
+
+  const ButtonDisplayStyle(this.wire);
+  final String wire;
+  static ButtonDisplayStyle fromWire(String w) =>
+      ButtonDisplayStyle.values.firstWhere((e) => e.wire == w);
+}
+
 enum HelloMode {
   pair('pair'),
   session('session');
@@ -104,16 +115,6 @@ enum WelcomeOs {
   final String wire;
   static WelcomeOs fromWire(String w) =>
       WelcomeOs.values.firstWhere((e) => e.wire == w);
-}
-
-enum ButtonStyle {
-  normal('normal'),
-  toggle('toggle');
-
-  const ButtonStyle(this.wire);
-  final String wire;
-  static ButtonStyle fromWire(String w) =>
-      ButtonStyle.values.firstWhere((e) => e.wire == w);
 }
 
 enum LyricsSource {
@@ -356,7 +357,7 @@ class Button {
   /// blob_id ikon; client cache by id
   final String? iconId;
   final String? color;
-  final ButtonStyle? style;
+  final ButtonDisplayStyle? style;
   /// teks deskriptif untuk aksesibilitas; BUKAN definisi aksi
   final String? actionHint;
 
@@ -365,7 +366,7 @@ class Button {
         label: m['label'] as String,
         iconId: m['icon_id'] as String?,
         color: m['color'] as String?,
-        style: m['style'] == null ? null : ButtonStyle.fromWire(m['style'] as String),
+        style: m['style'] == null ? null : ButtonDisplayStyle.fromWire(m['style'] as String),
         actionHint: m['action_hint'] as String?,
       );
 

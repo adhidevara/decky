@@ -103,6 +103,15 @@ pub enum ErrorCode {
     Internal,
 }
 
+/// Cara tombol digambar. Dinamai panjang agar tidak bentrok dengan ButtonStyle milik Flutter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ButtonDisplayStyle {
+    #[serde(rename = "normal")]
+    Normal,
+    #[serde(rename = "toggle")]
+    Toggle,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HelloMode {
     #[serde(rename = "pair")]
@@ -129,14 +138,6 @@ pub enum WelcomeOs {
     Macos,
     #[serde(rename = "linux")]
     Linux,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ButtonStyle {
-    #[serde(rename = "normal")]
-    Normal,
-    #[serde(rename = "toggle")]
-    Toggle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,7 +270,7 @@ pub struct Button {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<ButtonStyle>,
+    pub style: Option<ButtonDisplayStyle>,
     /// teks deskriptif untuk aksesibilitas; BUKAN definisi aksi
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_hint: Option<String>,

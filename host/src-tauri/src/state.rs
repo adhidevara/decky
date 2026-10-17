@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 use crate::actions::obs::ObsClient;
+use crate::blobs::BlobStore;
 use crate::config::HostConfig;
 use crate::pairing::{AttemptLimiter, PairingSession};
 
@@ -36,6 +37,8 @@ pub enum UiEvent {
     Rtt { client_id: String, rtt_ms: u32 },
     /// Layout atau profil deck berubah; koneksi yang hidup mengirim ulang.
     DeckChanged,
+    /// Scene OBS aktif berganti; tombol toggle perlu diperbarui.
+    ObsSceneChanged { scene: String },
     ServerError { msg: String },
 }
 
@@ -49,15 +52,18 @@ pub struct AppCtx {
     /// Koneksi OBS dipakai bersama semua client, dan menyambung sendiri
     /// saat pertama dibutuhkan.
     pub obs: Arc<ObsClient>,
+    pub blobs: BlobStore,
 }
 
 impl AppCtx {
     pub fn new(cfg_dir: PathBuf, cfg: HostConfig) -> Self {
         let (events, _) = broadcast::channel(64);
         let obs = Arc::new(ObsClient::new(cfg.obs.clone()));
+        let blobs = BlobStore::new(&cfg_dir);
         Self {
             cfg_dir,
             obs,
+            blobs,
             cfg: Mutex::new(cfg),
             pairing: Mutex::new(None),
             limiter: Mutex::new(AttemptLimiter::new()),
