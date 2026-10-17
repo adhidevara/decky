@@ -77,14 +77,11 @@ class _ConnectPageState extends State<ConnectPage> {
 
   Future<void> _connect(HostEndpoint host) async {
     final conn = _conn!;
-    final token = await TokenStore.load(host.hostId);
-    if (!mounted) return;
 
-    // Belum ada token untuk host ini: satu-satunya jalan adalah pairing PIN.
-    final pin = token == null ? await _askPin(host) : null;
-    if (token == null && pin == null) return;
-
-    await conn.connect(host, pin: pin);
+    // Mode sesi dicoba dulu; kalau host belum mengenal device ini, layer
+    // koneksi memanggil balik untuk minta PIN. Urutan itu perlu karena lewat
+    // USB `host_id` baru diketahui setelah Hello terkirim.
+    await conn.connect(host, askPin: (_) => _askPin(host));
     if (!mounted) return;
 
     // Begitu tersambung, deck adalah layar yang sebenarnya dipakai orang;

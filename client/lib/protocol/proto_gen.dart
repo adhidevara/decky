@@ -243,18 +243,22 @@ class HelloAck {
   const HelloAck({
     required this.v,
     required this.ok,
+    this.hostId,
     this.noise,
     this.code,
   });
 
   final int v;
   final bool ok;
+  /// Selalu diisi. Client yang datang lewat USB tidak melewati mDNS, jadi di sinilah ia belajar host_id — yang dibutuhkan sebagai salt PSK dan untuk mencari token tersimpan.
+  final String? hostId;
   final String? noise;
   final ErrorCode? code;
 
   factory HelloAck.fromMap(Map<String, dynamic> m) => HelloAck(
         v: m['v'] as int,
         ok: m['ok'] as bool,
+        hostId: m['host_id'] as String?,
         noise: m['noise'] as String?,
         code: m['code'] == null ? null : ErrorCode.fromWire(m['code'] as String),
       );
@@ -262,6 +266,7 @@ class HelloAck {
   Map<String, dynamic> toMap() => <String, dynamic>{
         'v': v,
         'ok': ok,
+        if (hostId != null) 'host_id': hostId,
         if (noise != null) 'noise': noise,
         if (code != null) 'code': code?.wire,
       };

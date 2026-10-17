@@ -37,12 +37,13 @@ Decky mengubah HP jadi *control surface* untuk komputer desktop, setara [WingDec
 
 Interop dibuktikan oleh `client/test/interop_test.dart`: test itu menjalankan host Rust sungguhan lewat `cargo run --example interop_host`, lalu melakukan pairing penuh. Unit test di satu bahasa saja tidak bisa menangkap ketidakcocokan handshake.
 
+**Diuji di perangkat fisik** (Huawei BTK-W09, Android 12): discovery mDNS menemukan host tanpa diberi IP, pairing PIN lewat USB berhasil, token tersimpan, grid deck tampil, dan tombol benar-benar menjalankan aksi di PC.
+
 **Sisa Fase 1:**
 
-- [ ] UI konfigurasi host (SvelteKit) — saat ini hanya ada perintah Tauri, belum ada layarnya
 - [ ] Tray icon dengan jumlah device terhubung
 - [ ] Jembatan USB: host menjalankan `adb reverse` otomatis saat device tercolok
-- [ ] Uji di HP fisik (discovery mDNS tidak bisa diuji di emulator)
+- [ ] Jalur Wi-Fi perlu aturan Windows Firewall untuk port 8787 — installer Fase 7 harus memasangnya, kalau tidak setiap user baru mengalami timeout yang sama
 
 **Verifikasi:** HP menemukan PC otomatis; pairing PIN sukses; matikan Wi-Fi → reconnect sendiri tanpa pairing ulang; RTT `ping`/`pong` tampil di UI.
 
@@ -58,9 +59,11 @@ Ikon dialamatkan oleh hash isinya: host menyimpan di `blobs/<id>.<ext>`, client 
 
 Tombol `toggle` mengikuti scene OBS yang sedang aktif, dipantau dengan polling dua detik. Polling lebih sederhana daripada stream event obs-websocket dan tahan terhadap OBS yang ditutup lalu dibuka lagi — justru kasus yang paling sering terjadi. Polling berhenti sendiri saat tidak ada HP terhubung.
 
+**Diuji di perangkat fisik:** tombol "Notepad" menjalankan Notepad di PC, tombol media diterima `SendInput` tanpa penolakan.
+
 **Sisa:**
 
-- [ ] Uji aksi sungguhan di HP fisik
+- [ ] Verifikasi independen efek hotkey (peluncuran aplikasi sudah terbukti; untuk `SendInput` yang terbukti baru bahwa OS menerimanya)
 
 **Verifikasi:** tombol buka Notepad, tombol hotkey `Ctrl+Shift+M`, tombol ganti scene OBS — semua trigger dari HP.
 

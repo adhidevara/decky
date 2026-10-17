@@ -69,6 +69,11 @@
       "properties": {
         "v": { "type": "integer", "const": 1 },
         "ok": { "type": "boolean" },
+        "host_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Selalu diisi. Client yang datang lewat USB tidak melewati mDNS, jadi di sinilah ia belajar host_id — yang dibutuhkan sebagai salt PSK dan untuk mencari token tersimpan."
+        },
         "noise": { "type": "string", "const": "Noise_NNpsk0_25519_ChaChaPoly_SHA256" },
         "code": { "$ref": "#/$defs/ErrorCode" }
       },

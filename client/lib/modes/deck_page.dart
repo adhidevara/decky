@@ -29,11 +29,34 @@ class _DeckPageState extends State<DeckPage> {
   /// Tombol toggle yang sedang menyala, menurut host.
   final Set<int> _active = {};
   final BlobCache _blobs = BlobCache();
+  StreamSubscription<Frame>? _subscription;
 
   @override
   void initState() {
     super.initState();
-    widget.conn.messages.listen(_onMessage);
+
+    // Layout biasanya sudah tiba sebelum layar ini dibuka, jadi ambil dulu
+    // yang tersimpan sebelum mulai mendengarkan yang berikutnya.
+    final layout = widget.conn.latest(MsgType.deckLayout);
+    if (layout != null) {
+      _layout = DeckLayout.fromMap(layout.data);
+      _fetchIcons(_layout!);
+    }
+    final profiles = widget.conn.latest(MsgType.deckProfiles);
+    if (profiles != null) {
+      _profiles = DeckProfiles.fromMap(profiles.data);
+    }
+    _active.addAll(
+      widget.conn.deckState.entries.where((e) => e.value).map((e) => e.key),
+    );
+
+    _subscription = widget.conn.messages.listen(_onMessage);
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 
   void _onMessage(Frame frame) {

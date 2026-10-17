@@ -230,17 +230,40 @@ class NoiseHandshake {
 }
 
 /// Channel terenkripsi setelah handshake selesai.
+///
+/// Setiap arah punya counter nonce yang maju satu per pesan, jadi operasi
+/// harus berurutan. Operasinya `async`, dan di Dart dua callback stream bisa
+/// saling menyela di titik `await` — kalau itu terjadi, kedua panggilan
+/// membaca counter yang sama dan sisa koneksi gagal MAC selamanya.
+///
+/// Urutan dijaga di sini, bukan di pemanggil: itu sifat cipher-nya, dan
+/// pemanggil tidak punya alasan untuk tahu.
 class NoiseChannel {
   NoiseChannel._(this._send, this._recv);
 
   final _CipherState _send;
   final _CipherState _recv;
 
+  Future<void> _sendLock = Future.value();
+  Future<void> _recvLock = Future.value();
+
   /// Enkripsi satu chunk (pemecahan payload ada di `frame.dart`).
-  Future<Uint8List> seal(List<int> plaintext) => _send.encrypt(const [], plaintext);
+  Future<Uint8List> seal(List<int> plaintext) {
+    final result = _sendLock.then((_) => _send.encrypt(const [], plaintext));
+    // Kegagalan tidak boleh mengunci antrean; pemanggil tetap menerima error
+    // lewat `result`.
+    _sendLock = result.then((_) {}, onError: (_) {});
+    return result;
+  }
 
   /// Dekripsi satu pesan Noise.
-  Future<Uint8List> open(Uint8List ciphertext) => _recv.decrypt(const [], ciphertext);
+  ///
+  /// Pesan harus disuapkan sesuai urutan datangnya dari socket.
+  Future<Uint8List> open(Uint8List ciphertext) {
+    final result = _recvLock.then((_) => _recv.decrypt(const [], ciphertext));
+    _recvLock = result.then((_) {}, onError: (_) {});
+    return result;
+  }
 }
 
 /// PSK mode pairing: HKDF-SHA256 atas PIN, di-salt dengan kedua id.

@@ -44,6 +44,9 @@ class DeckyConnection extends ChangeNotifier {
   HostEndpoint? _host;
   int _attempt = 0;
   bool _disposed = false;
+  Future<String?> Function(String hostId)? _askPin;
+  /// Diisi dari HelloAck; untuk endpoint USB inilah satu-satunya sumbernya.
+  String? _hostId;
 
   ConnectionStatus _status = const ConnectionStatus(ConnState.idle);
   ConnectionStatus get status => _status;
@@ -55,6 +58,27 @@ class DeckyConnection extends ChangeNotifier {
   final _messages = StreamController<Frame>.broadcast();
   Stream<Frame> get messages => _messages.stream;
 
+  /// Frame terakhir untuk tipe yang bersifat "keadaan", bukan "kejadian".
+  ///
+  /// Host mengirim layout tepat setelah welcome — biasanya sebelum layar deck
+  /// sempat berlangganan. Stream broadcast tidak menyimpan apa pun, jadi tanpa
+  /// cache ini layar itu menunggu selamanya pesan yang sudah lewat.
+  static const _stickyTypes = {
+    MsgType.deckLayout,
+    MsgType.deckProfiles,
+    MsgType.mediaState,
+    MsgType.lyrics,
+  };
+  final Map<String, Frame> _latest = {};
+
+  /// Keadaan tombol toggle terakhir yang diketahui, per indeks.
+  final Map<int, bool> _deckState = {};
+
+  /// Frame terakhir bertipe [type], kalau sudah pernah datang.
+  Frame? latest(String type) => _latest[type];
+
+  Map<int, bool> get deckState => Map.unmodifiable(_deckState);
+
   bool supports(Capability cap) => _welcome?.caps.contains(cap) ?? false;
 
   void _setStatus(ConnectionStatus s) {
@@ -63,16 +87,31 @@ class DeckyConnection extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sambungkan memakai token tersimpan. PIN hanya dipakai saat pairing.
-  Future<void> connect(HostEndpoint host, {String? pin}) async {
+  /// Sambungkan ke host.
+  ///
+  /// Mode sesi dicoba lebih dulu. Kalau host belum mengenal device ini,
+  /// [askPin] dipanggil untuk meminta PIN lalu pairing dijalankan.
+  ///
+  /// Urutan ini yang membuat jalur USB bekerja: di sana tidak ada mDNS, jadi
+  /// client belum tahu `host_id` — dan tanpa itu ia tidak bisa mencari token
+  /// tersimpan maupun menurunkan PSK. `host_id` baru diketahui dari HelloAck,
+  /// yang datang setelah Hello terkirim.
+  Future<void> connect(
+    HostEndpoint host, {
+    Future<String?> Function(String hostId)? askPin,
+  }) async {
     await _teardown();
     _host = host;
     _attempt = 0;
-    await _attemptConnect(host, pin: pin);
+    _askPin = askPin;
+    await _attemptConnect(host);
   }
 
   Future<void> _attemptConnect(HostEndpoint host, {String? pin}) async {
     final pairing = pin != null;
+    // Layout milik host sebelumnya tidak berlaku lagi.
+    _latest.clear();
+    _deckState.clear();
     _setStatus(ConnectionStatus(
       pairing ? ConnState.pairing : ConnState.connecting,
       host: host,
@@ -99,13 +138,29 @@ class DeckyConnection extends ChangeNotifier {
       ws.sink.add(encodeMap(hello.toMap()));
 
       final ack = HelloAck.fromMap(decodeMap(await inbox.next));
+      // Host mengirim host_id bahkan saat menolak, justru supaya client USB
+      // bisa belajar identitasnya lalu mencoba pairing.
+      final hostId = ack.hostId ?? host.hostId;
+      _hostId = hostId;
+
       if (!ack.ok) {
         throw DeckyError(ack.code ?? ErrorCode.internal);
       }
 
-      final psk = pairing
-          ? await pskFromPin(pin, host.hostId, _identity.clientId)
-          : pskFromToken(await _requireToken(host.hostId));
+      final Uint8List psk;
+      if (pairing) {
+        psk = await pskFromPin(pin, hostId, _identity.clientId);
+      } else {
+        final token = await TokenStore.load(hostId);
+        if (token == null) {
+          // Belum pernah dipasangkan dengan host ini. Baru sekarang kita tahu
+          // itu, karena host_id-nya memang baru diketahui barusan.
+          await _teardown();
+          await _startPairing(host);
+          return;
+        }
+        psk = pskFromToken(token);
+      }
 
       final hs = await NoiseHandshake.initiator(psk);
       ws.sink.add(await hs.writeMessage1());
@@ -123,6 +178,7 @@ class DeckyConnection extends ChangeNotifier {
       if (welcome.token != null) {
         await TokenStore.save(welcome.hostId, welcome.token!);
       }
+      _hostId = welcome.hostId;
 
       _attempt = 0;
       _setStatus(ConnectionStatus(ConnState.connected, host: host));
@@ -130,6 +186,13 @@ class DeckyConnection extends ChangeNotifier {
       _startPing();
     } catch (e) {
       await _teardown();
+
+      // Host melupakan device ini. Pairing ulang adalah jalan keluarnya,
+      // bukan mencoba token yang sama berulang kali.
+      if (!pairing && e is DeckyError && e.code == ErrorCode.authFailed) {
+        return _startPairing(host);
+      }
+
       final fatal = e is DeckyError && e.fatal;
       _setStatus(ConnectionStatus(
         fatal ? ConnState.failed : ConnState.reconnecting,
@@ -142,10 +205,24 @@ class DeckyConnection extends ChangeNotifier {
     }
   }
 
-  Future<Uint8List> _requireToken(String hostId) async {
-    final token = await TokenStore.load(hostId);
-    if (token == null) throw DeckyError(ErrorCode.authFailed);
-    return token;
+  /// Minta PIN ke UI lalu jalankan pairing.
+  Future<void> _startPairing(HostEndpoint host) async {
+    final ask = _askPin;
+    if (ask == null) {
+      _setStatus(ConnectionStatus(
+        ConnState.failed,
+        host: host,
+        error: DeckyError(ErrorCode.authFailed).toString(),
+      ));
+      return;
+    }
+
+    final pin = await ask(_hostId ?? host.hostId);
+    if (pin == null) {
+      _setStatus(ConnectionStatus(ConnState.idle, host: host));
+      return;
+    }
+    await _attemptConnect(host, pin: pin);
   }
 
   Future<Frame> _readFrame(_Inbox inbox, NoiseChannel chan) async {
@@ -166,6 +243,13 @@ class DeckyConnection extends ChangeNotifier {
             // Host memeriksa apakah kita masih hidup; balas apa adanya.
             await send(MsgType.pong, Ping.fromMap(frame.data).toMap());
             return;
+          }
+          if (_stickyTypes.contains(frame.type)) {
+            _latest[frame.type] = frame;
+          }
+          if (frame.type == MsgType.deckState) {
+            final state = DeckState.fromMap(frame.data);
+            _deckState[state.idx] = state.active;
           }
           _messages.add(frame);
         } catch (e) {

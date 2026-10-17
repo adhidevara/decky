@@ -137,23 +137,23 @@ async fn handshake(
     addr: SocketAddr,
 ) -> anyhow::Result<(Ws, Channel, Hello)> {
     let hello: Hello = frame::decode(&read_binary(&mut ws).await?)?;
+    let host_id = ctx.host_id();
 
     if hello.v != PROTOCOL_VERSION as i64 {
-        reject(&mut ws, ErrorCode::ProtoVersion).await;
+        reject(&mut ws, &host_id, ErrorCode::ProtoVersion).await;
         anyhow::bail!("versi protokol {} tidak didukung", hello.v);
     }
     if ctx.limiter_blocked(&hello.client_id) {
-        reject(&mut ws, ErrorCode::PairThrottled).await;
+        reject(&mut ws, &host_id, ErrorCode::PairThrottled).await;
         anyhow::bail!("client {} sedang di-throttle", hello.client_id);
     }
 
     // Tentukan PSK sebelum mengaku siap, supaya client yang tidak dikenal
     // ditolak tanpa kita buang waktu di handshake kripto.
-    let host_id = ctx.host_id();
     let (psk, pairing_mode) = match hello.mode {
         HelloMode::Pair => {
             let Some(session) = ctx.active_pairing() else {
-                reject(&mut ws, ErrorCode::PairExpired).await;
+                reject(&mut ws, &host_id, ErrorCode::PairExpired).await;
                 anyhow::bail!("tidak ada sesi pairing aktif");
             };
             (
@@ -164,7 +164,7 @@ async fn handshake(
         HelloMode::Session => match TokenStore::load(&hello.client_id)? {
             Some(token) => (noise::psk_from_token(&token), false),
             None => {
-                reject(&mut ws, ErrorCode::AuthFailed).await;
+                reject(&mut ws, &host_id, ErrorCode::AuthFailed).await;
                 anyhow::bail!("client {} belum dipasangkan", hello.client_id);
             }
         },
@@ -175,6 +175,7 @@ async fn handshake(
         frame::encode(&HelloAck {
             v: PROTOCOL_VERSION as i64,
             ok: true,
+            host_id: Some(host_id.clone()),
             noise: Some(noise::NOISE_PARAMS.to_string()),
             code: None,
         })?,
@@ -191,7 +192,7 @@ async fn handshake(
         if pairing_mode && ctx.record_pair_failure(&hello.client_id) {
             tracing::warn!("client {} diblokir setelah terlalu banyak PIN salah", hello.client_id);
         }
-        reject(&mut ws, ErrorCode::AuthFailed).await;
+        reject(&mut ws, &host_id, ErrorCode::AuthFailed).await;
         anyhow::bail!("handshake noise gagal dari {addr}");
     }
     let n = hs.write_message(&[], &mut buf)?;
@@ -531,10 +532,11 @@ async fn send_encrypted(ws: &mut Ws, chan: &mut Channel, msg: &HostMsg) -> anyho
 ///
 /// Isinya hanya kode error — tidak ada yang rahasia — dan ini jauh lebih
 /// berguna buat user daripada koneksi yang putus begitu saja.
-async fn reject(ws: &mut Ws, code: ErrorCode) {
+async fn reject(ws: &mut Ws, host_id: &str, code: ErrorCode) {
     let ack = HelloAck {
         v: PROTOCOL_VERSION as i64,
         ok: false,
+        host_id: Some(host_id.to_string()),
         noise: None,
         code: Some(code),
     };

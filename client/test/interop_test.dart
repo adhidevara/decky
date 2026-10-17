@@ -148,6 +148,24 @@ void main() {
     expect(pong.type, MsgType.pong);
     expect(Ping.fromMap(pong.data).ts, ts);
 
+    // 8. Beberapa pesan sekaligus, tanpa menunggu satu per satu.
+    //
+    // Counter nonce Noise maju satu per pesan, jadi enkripsi yang saling
+    // menyela akan memakai nonce yang sama dua kali dan merusak sisa koneksi.
+    // Dijalankan lewat Future.wait supaya benar-benar bersamaan.
+    const batch = [11, 22, 33, 44, 55];
+    await Future.wait([
+      for (final t in batch) send(MsgType.ping, Ping(ts: t).toMap()),
+    ]);
+
+    final echoed = <int>[];
+    for (var i = 0; i < batch.length; i++) {
+      final frame = await nextFrame();
+      expect(frame.type, MsgType.pong);
+      echoed.add(Ping.fromMap(frame.data).ts);
+    }
+    expect(echoed, batch, reason: 'pong harus kembali utuh dan berurutan');
+
     await ws.sink.close();
   }, timeout: const Timeout(Duration(minutes: 4)));
 }

@@ -228,6 +228,9 @@ pub struct Hello {
 pub struct HelloAck {
     pub v: i64,
     pub ok: bool,
+    /// Selalu diisi. Client yang datang lewat USB tidak melewati mDNS, jadi di sinilah ia belajar host_id — yang dibutuhkan sebagai salt PSK dan untuk mencari token tersimpan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
