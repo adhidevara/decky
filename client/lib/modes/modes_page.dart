@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../protocol/proto_gen.dart';
 import '../transport/connection.dart';
 import 'deck_page.dart';
+import 'keyboard_page.dart';
 import 'trackpad_page.dart';
 
 class ModesPage extends StatefulWidget {
@@ -52,12 +53,18 @@ class _ModesPageState extends State<ModesPage> {
           label: 'Deck',
           build: () => DeckPage(conn: widget.conn),
         ),
-      if (widget.conn.supports(Capability.input))
+      if (widget.conn.supports(Capability.input)) ...[
         _Mode(
           icon: Icons.touch_app,
           label: 'Trackpad',
           build: () => TrackpadPage(conn: widget.conn),
         ),
+        _Mode(
+          icon: Icons.keyboard,
+          label: 'Keyboard',
+          build: () => KeyboardPage(conn: widget.conn),
+        ),
+      ],
     ];
 
     if (modes.isEmpty) {
