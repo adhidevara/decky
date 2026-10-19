@@ -9,6 +9,7 @@
 pub mod input;
 pub mod keys;
 pub mod obs;
+pub mod pointer;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

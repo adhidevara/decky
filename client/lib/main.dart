@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'modes/deck_page.dart';
-import 'protocol/proto_gen.dart' show Capability;
+import 'modes/modes_page.dart';
 import 'transport/connection.dart';
 import 'transport/discovery.dart';
 import 'transport/identity.dart';
@@ -86,9 +85,9 @@ class _ConnectPageState extends State<ConnectPage> {
 
     // Begitu tersambung, deck adalah layar yang sebenarnya dipakai orang;
     // daftar host hanya pintu masuk.
-    if (conn.status.isLive && conn.supports(Capability.deck)) {
+    if (conn.status.isLive) {
       await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => DeckPage(conn: conn)),
+        MaterialPageRoute(builder: (_) => ModesPage(conn: conn)),
       );
     }
   }

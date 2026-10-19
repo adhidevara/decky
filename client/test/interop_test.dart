@@ -166,6 +166,34 @@ void main() {
     }
     expect(echoed, batch, reason: 'pong harus kembali utuh dan berurutan');
 
+    // 9. Pesan input diterima tanpa balasan error.
+    //
+    // Gerakan dan scroll sengaja nol: host akan benar-benar menggerakkan
+    // kursor mesin yang menjalankan test ini kalau nilainya bukan nol.
+    expect(welcome.caps, contains(Capability.input));
+    await send(MsgType.pointerMove, const PointerMove(e: [[0, 0]], dt: 16).toMap());
+    await send(MsgType.scroll, const Scroll(dx: 0, dy: 0).toMap());
+
+    // Ping susulan: kalau salah satu pesan di atas memicu error, frame
+    // berikutnya adalah error itu, bukan pong.
+    await send(MsgType.ping, const Ping(ts: 777).toMap());
+    final afterInput = await nextFrame();
+    expect(
+      afterInput.type,
+      MsgType.pong,
+      reason: 'pesan input tidak boleh menghasilkan error',
+    );
+    expect(Ping.fromMap(afterInput.data).ts, 777);
+
+    // 10. Tombol keyboard yang tidak dikenal harus ditolak dengan jelas.
+    await send(
+      MsgType.key,
+      const KeyEvent(code: 'BukanTombol', down: true, mods: 0).toMap(),
+    );
+    final keyErr = await nextFrame();
+    expect(keyErr.type, MsgType.error);
+    expect(ErrorMsg.fromMap(keyErr.data).code, ErrorCode.actionFailed);
+
     await ws.sink.close();
   }, timeout: const Timeout(Duration(minutes: 4)));
 }

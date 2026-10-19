@@ -39,11 +39,7 @@ Interop dibuktikan oleh `client/test/interop_test.dart`: test itu menjalankan ho
 
 **Diuji di perangkat fisik** (Huawei BTK-W09, Android 12): discovery mDNS menemukan host tanpa diberi IP, pairing PIN lewat USB berhasil, token tersimpan, grid deck tampil, dan tombol benar-benar menjalankan aksi di PC.
 
-**Sisa Fase 1:**
-
-- [ ] Tray icon dengan jumlah device terhubung
-- [ ] Jembatan USB: host menjalankan `adb reverse` otomatis saat device tercolok
-- [ ] Jalur Wi-Fi perlu aturan Windows Firewall untuk port 8787 — installer Fase 7 harus memasangnya, kalau tidak setiap user baru mengalami timeout yang sama
+**Fase 1 selesai.** Tray icon menampilkan jumlah device terhubung dan menyediakan jalan pintas pairing; host memasang `adb reverse` sendiri saat kabel tercolok; installer NSIS memasang aturan Windows Firewall untuk port 8787, dibatasi ke profil private dan domain.
 
 **Verifikasi:** HP menemukan PC otomatis; pairing PIN sukses; matikan Wi-Fi → reconnect sendiri tanpa pairing ulang; RTT `ping`/`pong` tampil di UI.
 

@@ -7,6 +7,7 @@ pub mod net;
 pub mod pairing;
 pub mod proto_gen;
 pub mod state;
+pub mod tray;
 
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -20,6 +21,8 @@ use state::{AppCtx, Connection};
 /// Dipegang Tauri sebagai managed state.
 struct Runtime {
     ctx: Arc<AppCtx>,
+    /// Ikon tray hilang dari taskbar kalau pegangannya dijatuhkan.
+    _tray: tauri::tray::TrayIcon,
     /// Kirim `true` untuk menghentikan server.
     shutdown: watch::Sender<bool>,
     /// Disimpan supaya service mDNS tetap hidup selama app jalan.
@@ -227,11 +230,21 @@ pub fn run() {
             let ctx = Arc::new(AppCtx::new(cfg_dir, cfg));
             let (shutdown, shutdown_rx) = watch::channel(false);
 
-            // Teruskan event dari lapisan jaringan ke frontend.
+            let tray = tray::install(app.handle(), ctx.clone())?;
+
+            // Teruskan event dari lapisan jaringan ke frontend, sekaligus
+            // jaga tooltip tray tetap sesuai.
             let mut events = ctx.subscribe();
             let handle = app.handle().clone();
+            let tray_ctx = ctx.clone();
             tauri::async_runtime::spawn(async move {
                 while let Ok(ev) = events.recv().await {
+                    if matches!(
+                        ev,
+                        state::UiEvent::Connected(_) | state::UiEvent::Disconnected { .. }
+                    ) {
+                        tray::update(&handle, tray_ctx.connections().len());
+                    }
                     if let Err(e) = handle.emit("decky://event", &ev) {
                         tracing::warn!("gagal mengirim event ke UI: {e}");
                     }
@@ -249,6 +262,7 @@ pub fn run() {
             app.manage(Runtime {
                 ctx,
                 shutdown,
+                _tray: tray,
                 _advertiser: advertiser,
             });
             Ok(())

@@ -1,7 +1,4 @@
-//! Injeksi keyboard lewat `SendInput`.
-//!
-//! Fase 3 menambahkan pointer di sini; untuk sekarang hanya keyboard, yang
-//! sudah cukup untuk hotkey dan teks di mode Deck.
+//! Injeksi keyboard dan pointer lewat `SendInput`.
 
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
@@ -11,6 +8,8 @@ use super::keys::{is_extended, vk_from_code};
 pub enum InputError {
     #[error("tombol tidak dikenal: {0}")]
     UnknownKey(String),
+    #[error("tombol mouse tidak dikenal: {0}")]
+    UnknownButton(u8),
     #[error("SendInput ditolak sistem (kemungkinan diblokir UIPI)")]
     Rejected,
 }
@@ -103,6 +102,47 @@ pub fn tap(code: &str) -> Result<(), InputError> {
     send(&[key_input(vk, true), key_input(vk, false)])
 }
 
+/// Tekan atau lepas satu tombol beserta modifier yang sedang ditahan.
+///
+/// Modifier ditekan sebelum tombol dan dilepas sesudahnya, supaya aplikasi
+/// tidak pernah melihat tombol utama tanpa modifier-nya.
+pub fn key_with_mods(code: &str, down: bool, mods: u8) -> Result<(), InputError> {
+    let vk = vk_from_code(code).ok_or_else(|| InputError::UnknownKey(code.to_string()))?;
+    let modifiers = modifier_vks(mods);
+
+    let mut inputs = Vec::with_capacity(modifiers.len() + 1);
+    if down {
+        for m in &modifiers {
+            inputs.push(key_input(*m, true));
+        }
+        inputs.push(key_input(vk, true));
+    } else {
+        inputs.push(key_input(vk, false));
+        for m in modifiers.iter().rev() {
+            inputs.push(key_input(*m, false));
+        }
+    }
+    send(&inputs)
+}
+
+/// Bitmask modifier dari protokol: 1 Shift, 2 Ctrl, 4 Alt, 8 Meta.
+fn modifier_vks(mods: u8) -> Vec<VIRTUAL_KEY> {
+    let mut out = Vec::new();
+    if mods & 1 != 0 {
+        out.push(VK_LSHIFT);
+    }
+    if mods & 2 != 0 {
+        out.push(VK_LCONTROL);
+    }
+    if mods & 4 != 0 {
+        out.push(VK_LMENU);
+    }
+    if mods & 8 != 0 {
+        out.push(VK_LWIN);
+    }
+    out
+}
+
 /// Ketik teks sebagai Unicode.
 ///
 /// Dikirim per potongan supaya teks panjang tidak membuat satu panggilan
@@ -120,6 +160,62 @@ pub fn type_text(text: &str) -> Result<(), InputError> {
         send(&inputs)?;
     }
     Ok(())
+}
+
+/// Gerakkan kursor relatif terhadap posisinya sekarang.
+///
+/// Relatif, bukan absolut: koordinat absolut akan memaksa client tahu ukuran
+/// layar PC, dan satu paket yang hilang akan melemparkan kursor ke tempat
+/// acak alih-alih sekadar melewatkan sedikit gerakan.
+pub fn mouse_move(dx: i32, dy: i32) -> Result<(), InputError> {
+    if dx == 0 && dy == 0 {
+        return Ok(());
+    }
+    send(&[mouse_input(dx, dy, 0, MOUSEEVENTF_MOVE)])
+}
+
+/// 0 kiri, 1 tengah, 2 kanan — sesuai definisi di protokol.
+pub fn mouse_button(button: u8, down: bool) -> Result<(), InputError> {
+    let flags = match (button, down) {
+        (0, true) => MOUSEEVENTF_LEFTDOWN,
+        (0, false) => MOUSEEVENTF_LEFTUP,
+        (1, true) => MOUSEEVENTF_MIDDLEDOWN,
+        (1, false) => MOUSEEVENTF_MIDDLEUP,
+        (2, true) => MOUSEEVENTF_RIGHTDOWN,
+        (2, false) => MOUSEEVENTF_RIGHTUP,
+        _ => return Err(InputError::UnknownButton(button)),
+    };
+    send(&[mouse_input(0, 0, 0, flags)])
+}
+
+/// Putar roda. Satuannya kelipatan 120, seperti yang diharapkan Windows.
+pub fn mouse_scroll(dx: i32, dy: i32) -> Result<(), InputError> {
+    let mut inputs = Vec::with_capacity(2);
+    if dy != 0 {
+        inputs.push(mouse_input(0, 0, dy, MOUSEEVENTF_WHEEL));
+    }
+    if dx != 0 {
+        inputs.push(mouse_input(0, 0, dx, MOUSEEVENTF_HWHEEL));
+    }
+    send(&inputs)
+}
+
+fn mouse_input(dx: i32, dy: i32, data: i32, flags: MOUSE_EVENT_FLAGS) -> INPUT {
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx,
+                dy,
+                // mouseData membawa jumlah putaran roda untuk event wheel, dan
+                // diabaikan untuk yang lain.
+                mouseData: data as u32,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
 }
 
 #[cfg(test)]
@@ -169,6 +265,63 @@ mod tests {
                 a.Anonymous.ki.dwFlags & KEYEVENTF_EXTENDEDKEY,
                 KEYBD_EVENT_FLAGS(0)
             );
+        }
+    }
+
+    #[test]
+    fn bitmask_modifier_dipetakan_sesuai_protokol() {
+        assert!(modifier_vks(0).is_empty());
+        assert_eq!(modifier_vks(1), vec![VK_LSHIFT]);
+        assert_eq!(modifier_vks(2), vec![VK_LCONTROL]);
+        assert_eq!(modifier_vks(4), vec![VK_LMENU]);
+        assert_eq!(modifier_vks(8), vec![VK_LWIN]);
+        assert_eq!(modifier_vks(3), vec![VK_LSHIFT, VK_LCONTROL]);
+        assert_eq!(
+            modifier_vks(15),
+            vec![VK_LSHIFT, VK_LCONTROL, VK_LMENU, VK_LWIN]
+        );
+    }
+
+    #[test]
+    fn key_dengan_tombol_tak_dikenal_ditolak() {
+        assert!(matches!(
+            key_with_mods("BukanTombol", true, 0).unwrap_err(),
+            InputError::UnknownKey(_)
+        ));
+    }
+
+    #[test]
+    fn gerakan_nol_tidak_mengirim_apa_apa() {
+        assert!(mouse_move(0, 0).is_ok());
+        assert!(mouse_scroll(0, 0).is_ok());
+    }
+
+    #[test]
+    fn tombol_mouse_tidak_dikenal_ditolak() {
+        let err = mouse_button(7, true).unwrap_err();
+        assert!(matches!(err, InputError::UnknownButton(7)));
+    }
+
+    #[test]
+    fn gerakan_memakai_flag_relatif() {
+        let input = mouse_input(5, -3, 0, MOUSEEVENTF_MOVE);
+        unsafe {
+            assert_eq!(input.Anonymous.mi.dx, 5);
+            assert_eq!(input.Anonymous.mi.dy, -3);
+            assert_eq!(input.Anonymous.mi.dwFlags & MOUSEEVENTF_MOVE, MOUSEEVENTF_MOVE);
+            assert_eq!(
+                input.Anonymous.mi.dwFlags & MOUSEEVENTF_ABSOLUTE,
+                MOUSE_EVENT_FLAGS(0),
+                "koordinat absolut tidak pernah dipakai"
+            );
+        }
+    }
+
+    #[test]
+    fn scroll_membawa_jumlah_di_mouse_data() {
+        let input = mouse_input(0, 0, 240, MOUSEEVENTF_WHEEL);
+        unsafe {
+            assert_eq!(input.Anonymous.mi.mouseData, 240);
         }
     }
 

@@ -14,11 +14,13 @@ use super::noise::{self, Channel, TOKEN_LEN};
 use crate::actions::{self, Action};
 use crate::config::{PairedDevice, now_secs};
 use crate::pairing::{self, TokenStore};
+use crate::actions::input;
+use crate::actions::pointer::PointerAccumulator;
 use crate::actions::ButtonStyle;
 use crate::proto_gen::{
     Blob, BlobMime, Capability, ClientMsg, DeckPress, DeckProfiles, DeckState, DeckSwitchProfile,
-    ErrorCode, Hello, HelloAck, HelloMode, HostMsg, Ping, Welcome, WantBlob, WelcomeOs,
-    PROTOCOL_VERSION,
+    ErrorCode, Hello, HelloAck, HelloMode, HostMsg, KeyEvent, Ping, PointerButton, PointerMove,
+    Scroll, TextInput, WantBlob, Welcome, WelcomeOs, PROTOCOL_VERSION,
 };
 use crate::state::{AppCtx, Connection, UiEvent};
 use tokio::sync::broadcast::error::RecvError;
@@ -39,6 +41,7 @@ pub async fn run(ctx: Arc<AppCtx>, mut shutdown: watch::Receiver<bool>) -> anyho
     tracing::info!("server mendengarkan di 0.0.0.0:{port}");
 
     tokio::spawn(watch_obs_scene(ctx.clone()));
+    tokio::spawn(super::usb::watch(port));
 
     loop {
         tokio::select! {
@@ -273,6 +276,9 @@ async fn message_loop(
     client_id: &str,
 ) -> anyhow::Result<()> {
     let mut events = ctx.subscribe();
+    // Sisa pecahan gerakan bersifat per-koneksi: dua HP yang menggerakkan
+    // kursor bersamaan tidak boleh saling mewarisi sisa gerakan.
+    let mut pointer = PointerAccumulator::new();
 
     loop {
         let raw = tokio::select! {
@@ -342,6 +348,56 @@ async fn message_loop(
             // Aksi dijalankan saat ditekan, bukan saat dilepas, supaya terasa
             // responsif. Release hanya berguna untuk tombol tahan nanti.
             ClientMsg::DeckRelease(_) => {}
+
+            ClientMsg::PointerMove(PointerMove { e, dt }) => {
+                let deltas: Vec<(i16, i16)> = e
+                    .iter()
+                    .filter_map(|pair| match pair.as_slice() {
+                        [dx, dy] => Some((*dx, *dy)),
+                        // Pasangan yang bentuknya salah dibuang satu-satu, bukan
+                        // membuang seluruh batch: kehilangan satu delta tidak
+                        // terasa, kehilangan satu frame penuh terasa tersendat.
+                        _ => None,
+                    })
+                    .collect();
+
+                let tuning = ctx.with_cfg(|c| c.pointer);
+                let (dx, dy) = pointer.step(&deltas, dt, &tuning);
+                if let Err(e) = input::mouse_move(dx, dy) {
+                    tracing::debug!("gerakan pointer ditolak: {e}");
+                }
+            }
+
+            ClientMsg::PointerButton(PointerButton { btn, down }) => {
+                // Jari diangkat mengakhiri satu gerakan; sisa pecahan tidak
+                // boleh terbawa ke gerakan berikutnya.
+                if !down {
+                    pointer.reset();
+                }
+                if let Err(e) = input::mouse_button(btn as u8, down) {
+                    send_error(ws, chan, ErrorCode::ActionFailed, &e.to_string()).await?;
+                }
+            }
+
+            ClientMsg::Scroll(Scroll { dx, dy }) => {
+                let tuning = ctx.with_cfg(|c| c.pointer);
+                let (cx, cy) = crate::actions::pointer::scroll_clicks(dx, dy, &tuning);
+                if let Err(e) = input::mouse_scroll(cx, cy) {
+                    tracing::debug!("scroll ditolak: {e}");
+                }
+            }
+
+            ClientMsg::Key(KeyEvent { code, down, mods }) => {
+                if let Err(e) = input::key_with_mods(&code, down, mods) {
+                    send_error(ws, chan, ErrorCode::ActionFailed, &e.to_string()).await?;
+                }
+            }
+
+            ClientMsg::Text(TextInput { s: text }) => {
+                if let Err(e) = input::type_text(&text) {
+                    send_error(ws, chan, ErrorCode::ActionFailed, &e.to_string()).await?;
+                }
+            }
 
             ClientMsg::WantBlob(WantBlob { blob_id }) => {
                 match ctx.blobs.load(&blob_id) {

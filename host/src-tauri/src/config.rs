@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::actions::DeckConfig;
 use crate::actions::obs::ObsSettings;
+use crate::actions::pointer::PointerTuning;
 use crate::proto_gen::DEFAULT_PORT;
 
 /// Device yang pernah dipasangkan. Tanpa token — hanya metadata tampilan.
@@ -36,6 +37,8 @@ pub struct HostConfig {
     pub deck: DeckConfig,
     #[serde(default)]
     pub obs: ObsSettings,
+    #[serde(default)]
+    pub pointer: PointerTuning,
 }
 
 impl Default for HostConfig {
@@ -47,6 +50,7 @@ impl Default for HostConfig {
             devices: Vec::new(),
             deck: DeckConfig::default(),
             obs: ObsSettings::default(),
+            pointer: PointerTuning::default(),
         }
     }
 }
