@@ -71,6 +71,13 @@ class ModifierBank {
   }
 }
 
+/// Tombol yang mengubah keyboard itu sendiri, bukan mengirim apa pun ke host.
+///
+/// Fn di keyboard sungguhan pun tidak pernah sampai ke sistem operasi — ia
+/// ditangani firmware keyboard. Jadi memperlakukannya sebagai tombol lokal
+/// bukan penyederhanaan, itu memang perilakunya.
+enum KeyAction { toggleFunctionRow }
+
 /// Satu tombol di layout.
 class KeyCap {
   const KeyCap(
@@ -79,6 +86,7 @@ class KeyCap {
     this.shifted,
     this.width = 1,
     this.modifier,
+    this.action,
   });
 
   /// Nama `KeyboardEvent.code` menurut W3C — netral terhadap layout fisik.
@@ -96,7 +104,13 @@ class KeyCap {
   /// Terisi kalau tombol ini mengubah modifier, bukan mengirim tombol.
   final Modifier? modifier;
 
+  /// Terisi kalau tombol ini hanya mengubah keyboard di sisi client.
+  final KeyAction? action;
+
   bool get isModifier => modifier != null;
+
+  /// Apakah menekan tombol ini mengirim sesuatu ke host?
+  bool get sendsKey => modifier == null && action == null;
 
   /// Label yang ditampilkan untuk keadaan Shift tertentu.
   String labelFor({required bool shift}) {
@@ -107,11 +121,14 @@ class KeyCap {
   }
 }
 
-/// Baris tombol fungsi. Disembunyikan secara bawaan — jarang dipakai, dan
-/// memakan tinggi layar yang lebih berguna untuk baris lain.
+/// Baris tombol fungsi, dimunculkan oleh tombol Fn.
+///
+/// Escape tidak ada di sini: ia terlalu sering dipakai untuk disembunyikan di
+/// balik pengalih, jadi tempatnya di baris utama. Sisanya — F1–F12 dan
+/// navigasi dokumen — jarang dipakai dan memakan tinggi layar yang lebih
+/// berguna untuk baris huruf.
 const List<List<KeyCap>> functionRow = [
   [
-    KeyCap('Escape', 'Esc', width: 1.4),
     KeyCap('F1', 'F1'),
     KeyCap('F2', 'F2'),
     KeyCap('F3', 'F3'),
@@ -124,7 +141,11 @@ const List<List<KeyCap>> functionRow = [
     KeyCap('F10', 'F10'),
     KeyCap('F11', 'F11'),
     KeyCap('F12', 'F12'),
-    KeyCap('Delete', 'Del', width: 1.4),
+    KeyCap('Insert', 'Ins'),
+    KeyCap('Home', 'Home'),
+    KeyCap('End', 'End'),
+    KeyCap('PageUp', 'PgUp'),
+    KeyCap('PageDown', 'PgDn'),
   ],
 ];
 
@@ -132,6 +153,9 @@ const List<List<KeyCap>> functionRow = [
 /// ke layout apa pun yang sedang aktif di PC.
 const List<List<KeyCap>> mainRows = [
   [
+    // Esc selalu terlihat: menutup dialog dan membatalkan adalah dua hal yang
+    // paling sering dibutuhkan, dan keduanya mendesak saat dibutuhkan.
+    KeyCap('Escape', 'Esc', width: 1.3),
     KeyCap('Backquote', '`', shifted: '~'),
     KeyCap('Digit1', '1', shifted: '!'),
     KeyCap('Digit2', '2', shifted: '@'),
@@ -194,6 +218,7 @@ const List<List<KeyCap>> mainRows = [
     KeyCap('Delete', 'Del', width: 1.4),
   ],
   [
+    KeyCap('Fn', 'Fn', width: 1.3, action: KeyAction.toggleFunctionRow),
     KeyCap('ControlLeft', 'Ctrl', width: 1.6, modifier: Modifier.ctrl),
     KeyCap('MetaLeft', 'Win', width: 1.4, modifier: Modifier.meta),
     KeyCap('AltLeft', 'Alt', width: 1.4, modifier: Modifier.alt),

@@ -31,6 +31,16 @@ class _KeyboardPageState extends State<KeyboardPage> {
   }
 
   Future<void> _press(KeyCap key) async {
+    if (key.action case final action?) {
+      unawaited(HapticFeedback.selectionClick());
+      setState(() {
+        switch (action) {
+          case KeyAction.toggleFunctionRow:
+            _showFunctionRow = !_showFunctionRow;
+        }
+      });
+      return;
+    }
     if (key.modifier case final modifier?) {
       setState(() => _mods.tap(modifier));
       unawaited(HapticFeedback.selectionClick());
@@ -62,6 +72,16 @@ class _KeyboardPageState extends State<KeyboardPage> {
     await widget.conn.send(proto.MsgType.text, proto.TextInput(s: text).toMap());
   }
 
+  /// Tombol yang sedang menyala digambar sama seperti modifier terkunci —
+  /// keduanya berarti "ini aktif sampai kamu mematikannya".
+  ModState _highlightOf(KeyCap key) {
+    if (key.action == KeyAction.toggleFunctionRow) {
+      return _showFunctionRow ? ModState.locked : ModState.off;
+    }
+    final modifier = key.modifier;
+    return modifier == null ? ModState.off : _mods.stateOf(modifier);
+  }
+
   @override
   Widget build(BuildContext context) {
     final shift = _mods.isActive(Modifier.shift);
@@ -71,16 +91,9 @@ class _KeyboardPageState extends State<KeyboardPage> {
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Keyboard'),
-        actions: [
-          IconButton(
-            icon: Icon(_showFunctionRow ? Icons.keyboard_hide : Icons.keyboard_double_arrow_up),
-            tooltip: _showFunctionRow ? 'Sembunyikan F1–F12' : 'Tampilkan F1–F12',
-            onPressed: () => setState(() => _showFunctionRow = !_showFunctionRow),
-          ),
-        ],
-      ),
+      // Tanpa tombol pengalih di app bar: Fn ada di layout, dan dua kontrol
+      // untuk hal yang sama hanya membuat orang menebak mana yang benar.
+      appBar: AppBar(title: const Text('Keyboard')),
       body: Column(
         children: [
           _TextField(controller: _text, onSubmit: _sendText),
@@ -106,9 +119,7 @@ class _KeyboardPageState extends State<KeyboardPage> {
                               child: _Key(
                                 cap: key,
                                 shift: shift,
-                                state: key.modifier == null
-                                    ? ModState.off
-                                    : _mods.stateOf(key.modifier!),
+                                state: _highlightOf(key),
                                 onTap: () => _press(key),
                               ),
                             ),

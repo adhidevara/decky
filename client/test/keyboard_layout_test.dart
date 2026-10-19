@@ -151,6 +151,62 @@ void main() {
       }
     });
 
+    test('Esc ada di baris utama, bukan di balik Fn', () {
+      final mainCodes = {
+        for (final row in mainRows)
+          for (final key in row) key.code,
+      };
+      expect(mainCodes, contains('Escape'),
+          reason: 'Esc terlalu sering dipakai untuk disembunyikan');
+
+      final functionCodes = {
+        for (final row in functionRow)
+          for (final key in row) key.code,
+      };
+      expect(functionCodes, isNot(contains('Escape')),
+          reason: 'satu tombol tidak boleh muncul di dua tempat');
+    });
+
+    test('Fn mengalihkan baris fungsi dan tidak mengirim apa pun', () {
+      final fn = [
+        for (final row in mainRows)
+          for (final key in row)
+            if (key.action == KeyAction.toggleFunctionRow) key,
+      ];
+      expect(fn, hasLength(1), reason: 'Fn harus ada, dan hanya satu');
+      expect(fn.single.sendsKey, isFalse);
+      expect(fn.single.isModifier, isFalse);
+    });
+
+    test('baris fungsi berisi F1-F12 dan navigasi dokumen', () {
+      final codes = {
+        for (final row in functionRow)
+          for (final key in row) key.code,
+      };
+      for (var n = 1; n <= 12; n++) {
+        expect(codes, contains('F$n'));
+      }
+      expect(codes, containsAll(['Insert', 'Home', 'End', 'PageUp', 'PageDown']));
+    });
+
+    test('tombol biasa mengirim ke host', () {
+      const a = KeyCap('KeyA', 'a');
+      expect(a.sendsKey, isTrue);
+      const shift = KeyCap('ShiftLeft', 'Shift', modifier: Modifier.shift);
+      expect(shift.sendsKey, isFalse);
+    });
+
+    test('tidak ada kode yang muncul dua kali di baris utama', () {
+      final seen = <String>{};
+      final duplicates = <String>[];
+      for (final row in mainRows) {
+        for (final key in row) {
+          if (!seen.add(key.code)) duplicates.add(key.code);
+        }
+      }
+      expect(duplicates, isEmpty, reason: 'kode ganda: $duplicates');
+    });
+
     test('keempat modifier tersedia di layout', () {
       final modifiers = {
         for (final row in mainRows)
