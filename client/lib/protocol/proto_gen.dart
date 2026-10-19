@@ -751,19 +751,24 @@ class Scroll {
   const Scroll({
     required this.dx,
     required this.dy,
+    this.mods,
   });
 
   final int dx;
   final int dy;
+  /// Modifier yang ditahan selama scroll, bitmask sama seperti KeyEvent. Dipakai untuk pinch-zoom, yang di hampir semua aplikasi berarti Ctrl + roda. Host yang menahan dan melepasnya, jadi modifier tidak bisa tertinggal menyala kalau koneksi putus di tengah gestur.
+  final int? mods;
 
   factory Scroll.fromMap(Map<String, dynamic> m) => Scroll(
         dx: m['dx'] as int,
         dy: m['dy'] as int,
+        mods: m['mods'] as int?,
       );
 
   Map<String, dynamic> toMap() => <String, dynamic>{
         'dx': dx,
         'dy': dy,
+        if (mods != null) 'mods': mods,
       };
 }
 

@@ -408,6 +408,9 @@ pub struct PointerButton {
 pub struct Scroll {
     pub dx: i16,
     pub dy: i16,
+    /// Modifier yang ditahan selama scroll, bitmask sama seperti KeyEvent. Dipakai untuk pinch-zoom, yang di hampir semua aplikasi berarti Ctrl + roda. Host yang menahan dan melepasnya, jadi modifier tidak bisa tertinggal menyala kalau koneksi putus di tengah gestur.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mods: Option<u8>,
 }
 
 /// Payload pesan `key`. Dinamai KeyEvent agar tidak bentrok dengan Key milik Flutter.

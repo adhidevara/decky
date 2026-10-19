@@ -315,7 +315,13 @@
       "required": ["dx", "dy"],
       "properties": {
         "dx": { "type": "integer", "minimum": -32768, "maximum": 32767 },
-        "dy": { "type": "integer", "minimum": -32768, "maximum": 32767 }
+        "dy": { "type": "integer", "minimum": -32768, "maximum": 32767 },
+        "mods": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15,
+          "description": "Modifier yang ditahan selama scroll, bitmask sama seperti KeyEvent. Dipakai untuk pinch-zoom, yang di hampir semua aplikasi berarti Ctrl + roda. Host yang menahan dan melepasnya, jadi modifier tidak bisa tertinggal menyala kalau koneksi putus di tengah gestur."
+        }
       },
       "additionalProperties": false
     },

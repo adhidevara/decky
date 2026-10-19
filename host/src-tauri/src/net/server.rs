@@ -379,10 +379,16 @@ async fn message_loop(
                 }
             }
 
-            ClientMsg::Scroll(Scroll { dx, dy }) => {
-                let tuning = ctx.with_cfg(|c| c.pointer);
+            ClientMsg::Scroll(Scroll { dx, dy, mods }) => {
+                let mut tuning = ctx.with_cfg(|c| c.pointer);
+                // Zoom bukan scroll: membalik arahnya mengikuti preferensi
+                // natural scrolling akan membuat merenggangkan jari justru
+                // memperkecil, yang tidak cocok dengan ekspektasi siapa pun.
+                if mods.unwrap_or(0) != 0 {
+                    tuning.natural_scroll = false;
+                }
                 let (cx, cy) = crate::actions::pointer::scroll_clicks(dx, dy, &tuning);
-                if let Err(e) = input::mouse_scroll(cx, cy) {
+                if let Err(e) = input::mouse_scroll(cx, cy, mods.unwrap_or(0)) {
                     tracing::debug!("scroll ditolak: {e}");
                 }
             }

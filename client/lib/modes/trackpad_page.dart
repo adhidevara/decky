@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 // adalah permainan yang tidak akan selesai.
 import '../protocol/proto_gen.dart' as proto;
 import '../transport/connection.dart';
+import 'gestures.dart';
 
 /// Seberapa sering delta yang terkumpul dikirim ke host.
 ///
@@ -20,11 +21,15 @@ import '../transport/connection.dart';
 /// 8 ms masih jauh di bawah ambang yang bisa dirasakan tangan.
 const Duration _flushInterval = Duration(milliseconds: 8);
 
-/// Jarak maksimal yang masih dianggap ketukan, bukan geseran.
-const double _tapSlop = 12;
+/// Bitmask Ctrl, sesuai definisi di protokol.
+const int _modCtrl = 2;
 
-/// Durasi maksimal sebuah ketukan.
-const Duration _tapTimeout = Duration(milliseconds: 250);
+/// Perubahan jarak antar jari yang dihitung sebagai satu langkah zoom.
+///
+/// Ctrl + roda adalah zoom berundak di hampir semua aplikasi, jadi gestur yang
+/// mulus harus diubah jadi undakan. Terlalu kecil membuat zoom meloncat liar;
+/// terlalu besar membuat pinch terasa tidak merespons.
+const double _zoomStep = 28;
 
 class TrackpadPage extends StatefulWidget {
   const TrackpadPage({super.key, required this.conn});
@@ -36,19 +41,17 @@ class TrackpadPage extends StatefulWidget {
 }
 
 class _TrackpadPageState extends State<TrackpadPage> {
-  final List<List<int>> _pending = [];
+  final GestureTracker _gestures = GestureTracker();
+
+  final List<List<int>> _pendingMove = [];
   Timer? _flusher;
 
-  /// Akumulasi scroll sampai cukup besar untuk dikirim sebagai piksel bulat.
+  /// Sisa pecahan scroll dan zoom, supaya gerakan pelan tidak hilang karena
+  /// pembulatan.
   double _scrollRestX = 0;
   double _scrollRestY = 0;
+  double _zoomRest = 0;
 
-  int _pointers = 0;
-  /// Jumlah jari terbanyak selama satu sentuhan — itulah yang menentukan
-  /// arti ketukan, karena saat jari diangkat hitungannya sudah turun.
-  int _maxPointers = 0;
-  Offset _travel = Offset.zero;
-  DateTime? _touchStart;
   bool _dragging = false;
 
   final FocusNode _keyboardFocus = FocusNode();
@@ -57,57 +60,79 @@ class _TrackpadPageState extends State<TrackpadPage> {
   @override
   void initState() {
     super.initState();
-    _flusher = Timer.periodic(_flushInterval, (_) => _flush());
+    _flusher = Timer.periodic(_flushInterval, (_) => _flushMove());
   }
 
   @override
   void dispose() {
     _flusher?.cancel();
+    _gestures.clear();
     _keyboardFocus.dispose();
     _textController.dispose();
     super.dispose();
   }
 
-  Future<void> _flush() async {
-    if (_pending.isEmpty) return;
-    final batch = List<List<int>>.from(_pending);
-    _pending.clear();
+  // ── gestur ────────────────────────────────────────────────────────────
+
+  void _onDown(PointerDownEvent e) => _gestures.down(e.pointer, e.position);
+
+  void _onMove(PointerMoveEvent e) =>
+      _apply(_gestures.move(e.pointer, e.position, e.delta));
+
+  void _onUp(PointerUpEvent e) => _apply(_gestures.up(e.pointer));
+
+  /// Android mengirim ini saat palm rejection, gestur sistem, atau recognizer
+  /// merebut pointer. Mengabaikannya membuat jari seolah masih menempel, dan
+  /// trackpad tersangkut di mode terakhirnya.
+  void _onCancel(PointerCancelEvent e) =>
+      _apply(_gestures.up(e.pointer, cancelled: true));
+
+  void _onLongPress() => _apply(_gestures.longPress());
+
+  void _apply(GestureOutput out) {
+    if (out.isEmpty) return;
+
+    if (out.move != Offset.zero) _queueMove(out.move);
+    if (out.scroll != Offset.zero) _sendScroll(out.scroll);
+    if (out.zoom != 0) _sendZoom(out.zoom);
+
+    if (out.dragStart) {
+      setState(() => _dragging = true);
+      unawaited(HapticFeedback.mediumImpact());
+      unawaited(_button(0, true));
+    }
+    if (out.dragEnd) {
+      setState(() => _dragging = false);
+      unawaited(_button(0, false));
+    }
+    if (out.tapButton case final button?) {
+      unawaited(HapticFeedback.selectionClick());
+      unawaited(_tap(button));
+    }
+  }
+
+  void _queueMove(Offset delta) {
+    final dx = delta.dx.round();
+    final dy = delta.dy.round();
+    if (dx == 0 && dy == 0) return;
+
+    _pendingMove.add([dx, dy]);
+    // Batch yang terlalu panjang berarti socket tidak mengejar; buang yang
+    // tertua, karena gerakan lama sudah tidak relevan.
+    if (_pendingMove.length > 60) _pendingMove.removeAt(0);
+  }
+
+  Future<void> _flushMove() async {
+    if (_pendingMove.isEmpty) return;
+    final batch = List<List<int>>.from(_pendingMove);
+    _pendingMove.clear();
     await widget.conn.send(
       proto.MsgType.pointerMove,
       proto.PointerMove(e: batch, dt: _flushInterval.inMilliseconds).toMap(),
     );
   }
 
-  void _onPointerDown(PointerDownEvent event) {
-    _pointers++;
-    _maxPointers = _pointers > _maxPointers ? _pointers : _maxPointers;
-    if (_pointers == 1) {
-      _travel = Offset.zero;
-      _touchStart = DateTime.now();
-    }
-  }
-
-  void _onPointerMove(PointerMoveEvent event) {
-    _travel += event.delta;
-
-    if (_pointers >= 2) {
-      _accumulateScroll(event.delta);
-      return;
-    }
-
-    // Delta datang sebagai double karena ada penskalaan piksel; dibulatkan
-    // di sini, dan sisa pecahannya ditangani host lewat akumulatornya.
-    final dx = event.delta.dx.round();
-    final dy = event.delta.dy.round();
-    if (dx != 0 || dy != 0) {
-      _pending.add([dx, dy]);
-      // Batch yang terlalu panjang berarti socket tidak mengejar; buang yang
-      // tertua, karena gerakan lama sudah tidak relevan.
-      if (_pending.length > 60) _pending.removeAt(0);
-    }
-  }
-
-  void _accumulateScroll(Offset delta) {
+  void _sendScroll(Offset delta) {
     _scrollRestX += delta.dx;
     _scrollRestY += delta.dy;
 
@@ -117,55 +142,37 @@ class _TrackpadPageState extends State<TrackpadPage> {
 
     _scrollRestX -= dx;
     _scrollRestY -= dy;
-    widget.conn.send(proto.MsgType.scroll, proto.Scroll(dx: dx, dy: dy).toMap());
+    unawaited(widget.conn.send(
+      proto.MsgType.scroll,
+      proto.Scroll(dx: dx, dy: dy).toMap(),
+    ));
   }
 
-  Future<void> _onPointerUp(PointerUpEvent event) async {
-    _pointers = _pointers > 0 ? _pointers - 1 : 0;
-    if (_pointers > 0) return;
+  void _sendZoom(double spanDelta) {
+    _zoomRest += spanDelta;
 
-    final fingers = _maxPointers;
-    final travel = _travel.distance;
-    final held = DateTime.now().difference(_touchStart ?? DateTime.now());
-    _maxPointers = 0;
-    _scrollRestX = 0;
-    _scrollRestY = 0;
+    final steps = (_zoomRest / _zoomStep).truncate();
+    if (steps == 0) return;
+    _zoomRest -= steps * _zoomStep;
 
-    if (_dragging) {
-      _dragging = false;
-      await _button(0, false);
-      return;
-    }
-
-    final isTap = travel < _tapSlop && held < _tapTimeout;
-    if (!isTap) return;
-
-    // Satu jari klik kiri, dua jari klik kanan — kebiasaan yang sama dengan
-    // trackpad laptop, jadi tidak perlu dipelajari ulang.
-    final button = switch (fingers) {
-      1 => 0,
-      2 => 2,
-      3 => 1,
-      _ => null,
-    };
-    if (button == null) return;
-
-    unawaited(HapticFeedback.selectionClick());
-    await _button(button, true);
-    await _button(button, false);
+    // Ctrl + roda. Host yang menahan dan melepas Ctrl di dalam satu panggilan,
+    // jadi modifier tidak bisa tertinggal menyala kalau koneksi putus.
+    unawaited(widget.conn.send(
+      proto.MsgType.scroll,
+      proto.Scroll(dx: 0, dy: steps * 40, mods: _modCtrl).toMap(),
+    ));
   }
+
+  // ── pengiriman ────────────────────────────────────────────────────────
 
   Future<void> _button(int btn, bool down) => widget.conn.send(
         proto.MsgType.pointerButton,
         proto.PointerButton(btn: btn, down: down).toMap(),
       );
 
-  /// Tekan-tahan memulai seret: tombol kiri ditahan sampai jari diangkat.
-  Future<void> _onLongPress() async {
-    if (_pointers != 1 || _dragging) return;
-    _dragging = true;
-    unawaited(HapticFeedback.mediumImpact());
-    await _button(0, true);
+  Future<void> _tap(int btn) async {
+    await _button(btn, true);
+    await _button(btn, false);
   }
 
   Future<void> _sendText(String text) async {
@@ -175,9 +182,17 @@ class _TrackpadPageState extends State<TrackpadPage> {
   }
 
   Future<void> _sendKey(String code, {int mods = 0}) async {
-    await widget.conn.send(proto.MsgType.key, proto.KeyEvent(code: code, down: true, mods: mods).toMap());
-    await widget.conn.send(proto.MsgType.key, proto.KeyEvent(code: code, down: false, mods: mods).toMap());
+    await widget.conn.send(
+      proto.MsgType.key,
+      proto.KeyEvent(code: code, down: true, mods: mods).toMap(),
+    );
+    await widget.conn.send(
+      proto.MsgType.key,
+      proto.KeyEvent(code: code, down: false, mods: mods).toMap(),
+    );
   }
+
+  // ── tampilan ──────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -198,9 +213,10 @@ class _TrackpadPageState extends State<TrackpadPage> {
         children: [
           Expanded(
             child: Listener(
-              onPointerDown: _onPointerDown,
-              onPointerMove: _onPointerMove,
-              onPointerUp: _onPointerUp,
+              onPointerDown: _onDown,
+              onPointerMove: _onMove,
+              onPointerUp: _onUp,
+              onPointerCancel: _onCancel,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onLongPress: _onLongPress,
@@ -212,7 +228,7 @@ class _TrackpadPageState extends State<TrackpadPage> {
                   ),
                   alignment: Alignment.center,
                   child: Text(
-                    _dragging ? 'Menyeret…' : 'Geser untuk menggerakkan kursor',
+                    _dragging ? 'Menyeret…' : _hint,
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
                 ),
@@ -230,6 +246,8 @@ class _TrackpadPageState extends State<TrackpadPage> {
       ),
     );
   }
+
+  static const _hint = 'Geser untuk kursor · dua jari scroll · cubit untuk zoom';
 }
 
 /// Tombol mouse eksplisit, untuk saat ketukan multi-jari tidak praktis.

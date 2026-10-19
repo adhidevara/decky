@@ -189,14 +189,31 @@ pub fn mouse_button(button: u8, down: bool) -> Result<(), InputError> {
 }
 
 /// Putar roda. Satuannya kelipatan 120, seperti yang diharapkan Windows.
-pub fn mouse_scroll(dx: i32, dy: i32) -> Result<(), InputError> {
-    let mut inputs = Vec::with_capacity(2);
+///
+/// `mods` menahan modifier selama putaran — Ctrl + roda adalah cara hampir
+/// semua aplikasi memahami zoom. Modifier ditekan dan dilepas di dalam satu
+/// panggilan `SendInput`, jadi tidak mungkin tertinggal menyala.
+pub fn mouse_scroll(dx: i32, dy: i32, mods: u8) -> Result<(), InputError> {
+    if dx == 0 && dy == 0 {
+        return Ok(());
+    }
+
+    let modifiers = modifier_vks(mods);
+    let mut inputs = Vec::with_capacity(modifiers.len() * 2 + 2);
+
+    for m in &modifiers {
+        inputs.push(key_input(*m, true));
+    }
     if dy != 0 {
         inputs.push(mouse_input(0, 0, dy, MOUSEEVENTF_WHEEL));
     }
     if dx != 0 {
         inputs.push(mouse_input(0, 0, dx, MOUSEEVENTF_HWHEEL));
     }
+    for m in modifiers.iter().rev() {
+        inputs.push(key_input(*m, false));
+    }
+
     send(&inputs)
 }
 
@@ -293,7 +310,8 @@ mod tests {
     #[test]
     fn gerakan_nol_tidak_mengirim_apa_apa() {
         assert!(mouse_move(0, 0).is_ok());
-        assert!(mouse_scroll(0, 0).is_ok());
+        assert!(mouse_scroll(0, 0, 0).is_ok());
+        assert!(mouse_scroll(0, 0, 2).is_ok(), "mods tanpa gerakan juga tidak dikirim");
     }
 
     #[test]
