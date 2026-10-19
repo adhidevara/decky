@@ -72,12 +72,19 @@ Tombol `toggle` mengikuti scene OBS yang sedang aktif, dipantau dengan polling d
 
 ### Fase 4 — System Monitor
 
-- Host: `sysinfo` (CPU, RAM, disk, network), `nvml-wrapper` untuk GPU NVIDIA
-- Suhu: WMI namespace `root\LibreHardwareMonitor` kalau LHM terpasang; kalau tidak, cap `monitor.cpu_temp` tidak diumumkan dan UI-nya hilang
-- Streaming `monitor_tick` sesuai interval subscribe (default 1 detik)
-- Client: gauge radial + sparkline, layout landscape
+**Terpasang.** CPU (agregat dan per inti), memori, throughput jaringan dan disk lewat `sysinfo`; GPU NVIDIA lewat `nvml-wrapper`. Client menampilkan sparkline satu menit terakhir untuk CPU, GPU, dan jaringan.
 
-**Verifikasi:** beri beban CPU, angka di HP cocok dengan Task Manager.
+Semua angka dilaporkan sebagai **laju per detik**, bukan total kumulatif. Menghitung selisih di sisi HP berarti angka pertama setelah menyambung selalu salah, dan tiap client harus menemukan ulang aritmetika yang sama.
+
+Langganan bersifat per koneksi: tiap HP meminta interval dan daftar metriknya sendiri, dan host tidak mengambil sampel apa pun sebelum ada yang meminta. Menutup layar monitor mengirim `monitor_unsub` — mengambil sampel untuk grafik yang tidak dilihat siapa pun membuang CPU host sekaligus baterai HP.
+
+Sensor diperiksa sekali saat start, lalu diumumkan sebagai kapabilitas. Sekali saja memang disengaja: perangkat keras tidak berubah di tengah sesi, dan memeriksanya ulang tiap koneksi berarti menunggu NVML setiap kali HP menyambung. Di mesin pengembangan ini hasilnya suhu CPU tidak terbaca, GPU dan suhu GPU terbaca. Client menyembunyikan apa yang tidak diumumkan — gauge kosong lebih buruk daripada gauge yang tidak ada.
+
+**Sisa:**
+
+- [ ] Suhu CPU lewat LibreHardwareMonitor. Windows tidak punya API suhu resmi tanpa driver, dan `Components` milik `sysinfo` kembali kosong tanpa itu.
+- [ ] GPU selain NVIDIA. AMD dan Intel tidak punya padanan sesederhana NVML.
+- [ ] Bandingkan angkanya dengan Task Manager di bawah beban.
 
 ### Fase 5 — Music & Lyrics
 
