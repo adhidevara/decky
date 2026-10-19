@@ -198,7 +198,7 @@
       "type": "object",
       "required": ["ts", "cpu", "mem_used", "mem_total", "net_rx", "net_tx", "disk_r", "disk_w"],
       "properties": {
-        "ts": { "type": "integer" },
+        "ts": { "type": "integer", "minimum": 0 },
         "cpu": { "type": "number", "minimum": 0, "maximum": 100 },
         "cpu_per_core": { "type": "array", "items": { "type": "number" } },
         "mem_used": { "type": "integer", "minimum": 0 },

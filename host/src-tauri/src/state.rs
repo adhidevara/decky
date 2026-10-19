@@ -11,6 +11,7 @@ use tokio::sync::broadcast;
 
 use crate::actions::obs::ObsClient;
 use crate::blobs::BlobStore;
+use crate::monitor::{Available, Monitor};
 use crate::config::HostConfig;
 use crate::pairing::{AttemptLimiter, PairingSession};
 
@@ -53,6 +54,10 @@ pub struct AppCtx {
     /// saat pertama dibutuhkan.
     pub obs: Arc<ObsClient>,
     pub blobs: BlobStore,
+    /// Hasil pemeriksaan sensor saat start. Diperiksa sekali: perangkat keras
+    /// tidak berubah di tengah sesi, dan memeriksanya ulang tiap koneksi
+    /// berarti menunggu NVML setiap kali HP menyambung.
+    monitor_available: Available,
 }
 
 impl AppCtx {
@@ -60,16 +65,28 @@ impl AppCtx {
         let (events, _) = broadcast::channel(64);
         let obs = Arc::new(ObsClient::new(cfg.obs.clone()));
         let blobs = BlobStore::new(&cfg_dir);
+        let monitor_available = Monitor::new().probe();
+        tracing::info!(
+            "sensor terbaca: suhu CPU {}, GPU {}, suhu GPU {}",
+            monitor_available.cpu_temp,
+            monitor_available.gpu,
+            monitor_available.gpu_temp
+        );
         Self {
             cfg_dir,
             obs,
             blobs,
+            monitor_available,
             cfg: Mutex::new(cfg),
             pairing: Mutex::new(None),
             limiter: Mutex::new(AttemptLimiter::new()),
             conns: Mutex::new(HashMap::new()),
             events,
         }
+    }
+
+    pub fn monitor_available(&self) -> Available {
+        self.monitor_available
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<UiEvent> {

@@ -17,10 +17,11 @@ use crate::pairing::{self, TokenStore};
 use crate::actions::input;
 use crate::actions::pointer::PointerAccumulator;
 use crate::actions::ButtonStyle;
+use crate::monitor::{Monitor, Wanted};
 use crate::proto_gen::{
     Blob, BlobMime, Capability, ClientMsg, DeckPress, DeckProfiles, DeckState, DeckSwitchProfile,
-    ErrorCode, Hello, HelloAck, HelloMode, HostMsg, KeyEvent, Ping, PointerButton, PointerMove,
-    Scroll, TextInput, WantBlob, Welcome, WelcomeOs, PROTOCOL_VERSION,
+    ErrorCode, Hello, HelloAck, HelloMode, HostMsg, KeyEvent, MonitorSub, Ping, PointerButton,
+    PointerMove, Scroll, TextInput, WantBlob, Welcome, WelcomeOs, PROTOCOL_VERSION,
 };
 use crate::state::{AppCtx, Connection, UiEvent};
 use tokio::sync::broadcast::error::RecvError;
@@ -262,7 +263,21 @@ fn finish_pairing(ctx: &Arc<AppCtx>, hello: &Hello) -> anyhow::Result<[u8; TOKEN
 /// Client menyembunyikan UI untuk apa pun yang tidak ada di sini, jadi daftar
 /// ini harus jujur: lebih baik fitur tidak muncul daripada muncul lalu gagal.
 async fn capabilities(ctx: &Arc<AppCtx>) -> Vec<Capability> {
-    let mut caps = vec![Capability::Deck, Capability::Input];
+    let mut caps = vec![Capability::Deck, Capability::Input, Capability::Monitor];
+
+    // Kapabilitas monitor diumumkan hanya kalau sensornya benar-benar terbaca.
+    // Gauge kosong lebih buruk daripada gauge yang tidak ada.
+    let available = ctx.monitor_available();
+    if available.cpu_temp {
+        caps.push(Capability::MonitorCpuTemp);
+    }
+    if available.gpu {
+        caps.push(Capability::MonitorGpu);
+    }
+    if available.gpu_temp {
+        caps.push(Capability::MonitorGpuTemp);
+    }
+
     if ctx.obs.is_live().await {
         caps.push(Capability::Obs);
     }
@@ -280,8 +295,22 @@ async fn message_loop(
     // kursor bersamaan tidak boleh saling mewarisi sisa gerakan.
     let mut pointer = PointerAccumulator::new();
 
+    // Monitor berdiri sendiri per koneksi: tiap HP bisa meminta interval dan
+    // metrik yang berbeda, dan tidak ada yang diambil sebelum ada yang minta.
+    let mut monitor: Option<Monitor> = None;
+    let mut wanted = Wanted::default();
+    let mut ticker: Option<tokio::time::Interval> = None;
+
     loop {
         let raw = tokio::select! {
+            // Hanya aktif setelah client berlangganan.
+            _ = async { ticker.as_mut().unwrap().tick().await }, if ticker.is_some() => {
+                if let Some(m) = monitor.as_mut() {
+                    let tick = m.sample(wanted);
+                    send_encrypted(ws, chan, &HostMsg::MonitorTick(tick)).await?;
+                }
+                continue;
+            }
             // Config berubah di UI host: dorong layout baru tanpa menunggu
             // client bertanya.
             ev = events.recv() => {
@@ -403,6 +432,27 @@ async fn message_loop(
                 if let Err(e) = input::type_text(&text) {
                     send_error(ws, chan, ErrorCode::ActionFailed, &e.to_string()).await?;
                 }
+            }
+
+            ClientMsg::MonitorSub(MonitorSub { interval_ms, want }) => {
+                wanted = Wanted::from_list(want.as_deref().unwrap_or(&[]));
+                if monitor.is_none() {
+                    monitor = Some(Monitor::new());
+                }
+
+                let period = Duration::from_millis(interval_ms.max(200) as u64);
+                let mut interval = tokio::time::interval(period);
+                // Tick yang terlewat karena host sibuk tidak perlu dikejar;
+                // yang penting angka terbaru, bukan semua angka.
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                ticker = Some(interval);
+            }
+
+            ClientMsg::MonitorUnsub(_) => {
+                // Monitor ikut dibuang supaya tidak ada yang mengambil sampel
+                // untuk layar yang sudah ditutup.
+                ticker = None;
+                monitor = None;
             }
 
             ClientMsg::WantBlob(WantBlob { blob_id }) => {

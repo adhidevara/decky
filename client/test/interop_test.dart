@@ -185,7 +185,35 @@ void main() {
     );
     expect(Ping.fromMap(afterInput.data).ts, 777);
 
-    // 10. Tombol keyboard yang tidak dikenal harus ditolak dengan jelas.
+    // 10. Berlangganan monitor harus menghasilkan cuplikan berisi angka nyata.
+    expect(welcome.caps, contains(Capability.monitor));
+    await send(
+      MsgType.monitorSub,
+      const MonitorSub(
+        intervalMs: 200,
+        want: [MonitorSubWantItem.cpu, MonitorSubWantItem.mem],
+      ).toMap(),
+    );
+
+    final tickFrame = await nextFrame();
+    expect(tickFrame.type, MsgType.monitorTick);
+    final tick = MonitorTick.fromMap(tickFrame.data);
+    expect(tick.ts, greaterThan(0));
+    expect(tick.cpu, inInclusiveRange(0, 100));
+    expect(tick.memTotal, greaterThan(0), reason: 'total memori harus terbaca');
+    expect(tick.memUsed, lessThanOrEqualTo(tick.memTotal));
+    // Yang tidak diminta tidak boleh ikut diambil.
+    expect(tick.netRx, 0);
+    expect(tick.diskR, 0);
+
+    // Cuplikan kedua membuktikan ia benar-benar berulang, bukan sekali kirim.
+    final second = await nextFrame();
+    expect(second.type, MsgType.monitorTick);
+    expect(MonitorTick.fromMap(second.data).ts, greaterThanOrEqualTo(tick.ts));
+
+    await send(MsgType.monitorUnsub, const MonitorUnsub().toMap());
+
+    // 11. Tombol keyboard yang tidak dikenal harus ditolak dengan jelas.
     await send(
       MsgType.key,
       const KeyEvent(code: 'BukanTombol', down: true, mods: 0).toMap(),

@@ -7,6 +7,7 @@ import '../protocol/proto_gen.dart';
 import '../transport/connection.dart';
 import 'deck_page.dart';
 import 'keyboard_page.dart';
+import 'monitor_page.dart';
 import 'trackpad_page.dart';
 
 class ModesPage extends StatefulWidget {
@@ -65,6 +66,12 @@ class _ModesPageState extends State<ModesPage> {
           build: () => KeyboardPage(conn: widget.conn),
         ),
       ],
+      if (widget.conn.supports(Capability.monitor))
+        _Mode(
+          icon: Icons.speed,
+          label: 'Monitor',
+          build: () => MonitorPage(conn: widget.conn),
+        ),
     ];
 
     if (modes.isEmpty) {

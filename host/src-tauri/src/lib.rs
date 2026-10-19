@@ -3,6 +3,7 @@
 pub mod actions;
 pub mod blobs;
 pub mod config;
+pub mod monitor;
 pub mod net;
 pub mod pairing;
 pub mod proto_gen;

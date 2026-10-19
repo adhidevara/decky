@@ -323,7 +323,7 @@ pub struct Gpu {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MonitorTick {
-    pub ts: i64,
+    pub ts: u64,
     pub cpu: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu_per_core: Option<Vec<f32>>,

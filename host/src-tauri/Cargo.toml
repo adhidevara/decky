@@ -41,6 +41,8 @@ keyring = "4.2.0"
 windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 obws = "0.15.0"
 base64 = "0.23.1"
+sysinfo = "0.39.6"
+nvml-wrapper = "0.13.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
